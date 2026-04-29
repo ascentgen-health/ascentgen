@@ -1,0 +1,1906 @@
+// lib/supabase/server.ts
+import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers'
+
+export function createClient() {
+  const cookieStore = cookies()
+
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll()
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            )
+          } catch {
+            // The `setAll` method is called from a Server Component.
+            // This can be ignored if you have middleware refreshing sessions.
+          }
+        },
+      },
+    }
+  )
+}
+import { createBrowserClient } from '@supabase/ssr';
+
+export function createClient() {
+  return createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+}
+// lib/gq.ts — Generative Quotient calculation engine
+// Targets per Bible v0.2:
+//   Waking temp: 36.6 °C | Post-meal temp: 37.0 °C
+//   Waking pulse: 75 bpm  | Post-meal pulse: 82 bpm
+
+export type GQTier = 'Dormant' | 'Kindling' | 'Ascending'
+export type PatternLabel = 'Cold & Slow' | 'Hot but Wired' | 'Warm & Steady'
+
+export interface DailyEntryForGQ {
+  waking_temp_value: number | null
+  waking_temp_unit: 'C' | 'F'
+  waking_pulse_bpm: number | null
+  post_meal_temp_value: number | null
+  post_meal_temp_unit: 'C' | 'F'
+  post_meal_pulse_bpm: number | null
+}
+
+export interface GQResult {
+  gqScore: number
+  gqTier: GQTier
+  patternLabel: PatternLabel
+  entryCount: number
+  windowDays: number
+  avgWakingTemp: number | null
+  avgPostMealTemp: number | null
+  avgWakingPulse: number | null
+  avgPostMealPulse: number | null
+}
+
+// Convert F → C
+function toC(value: number, unit: 'C' | 'F'): number {
+  return unit === 'F' ? (value - 32) * (5 / 9) : value
+}
+
+// Closeness score: 1.0 at threshold, 0.0 at ceiling, linear between
+function closenessScore(
+  value: number,
+  ideal: number,
+  threshold: number,
+  ceiling: number
+): number {
+  const diff = Math.abs(value - ideal)
+  if (diff <= threshold) return 1.0
+  if (diff >= ceiling) return 0.0
+  return 1.0 - (diff - threshold) / (ceiling - threshold)
+}
+
+// Stability score (lower SD = better)
+function stabilityScore(values: number[], sdThreshold: number, sdCeiling: number): number {
+  if (values.length < 2) return 1.0
+  const mean = values.reduce((a, b) => a + b, 0) / values.length
+  const variance = values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / values.length
+  const sd = Math.sqrt(variance)
+  if (sd <= sdThreshold) return 1.0
+  if (sd >= sdCeiling) return 0.0
+  return 1.0 - (sd - sdThreshold) / (sdCeiling - sdThreshold)
+}
+
+function stdDev(values: number[]): number {
+  if (values.length < 2) return 0
+  const mean = values.reduce((a, b) => a + b, 0) / values.length
+  return Math.sqrt(values.reduce((s, v) => s + (v - mean) ** 2, 0) / values.length)
+}
+
+export function computeGQ(
+  entries: DailyEntryForGQ[],
+  windowDays: number = 14
+): GQResult | null {
+  // Require at least 7 entries for a meaningful score
+  const valid = entries.filter(
+    (e) =>
+      e.waking_temp_value != null &&
+      e.waking_pulse_bpm != null &&
+      e.post_meal_temp_value != null &&
+      e.post_meal_pulse_bpm != null
+  )
+
+  if (valid.length < 7) return null
+
+  const slice = valid.slice(-windowDays)
+
+  const wakingTemps = slice.map((e) => toC(e.waking_temp_value!, e.waking_temp_unit))
+  const postMealTemps = slice.map((e) => toC(e.post_meal_temp_value!, e.post_meal_temp_unit))
+  const wakingPulses = slice.map((e) => e.waking_pulse_bpm!)
+  const postMealPulses = slice.map((e) => e.post_meal_pulse_bpm!)
+
+  // Closeness scores per entry, then average
+  const wtClose = wakingTemps.map((t) => closenessScore(t, 36.6, 0.2, 0.9))
+  const pmtClose = postMealTemps.map((t) => closenessScore(t, 37.0, 0.2, 0.9))
+  const wpClose = wakingPulses.map((p) => closenessScore(p, 75, 3, 20))
+  const pmpClose = postMealPulses.map((p) => closenessScore(p, 82, 3, 20))
+
+  const avg = (arr: number[]) => arr.reduce((a, b) => a + b, 0) / arr.length
+
+  const tempScore = (avg(wtClose) + avg(pmtClose)) / 2
+  const pulseScore = (avg(wpClose) + avg(pmpClose)) / 2
+
+  // Stability scores
+  const wtStab = stabilityScore(wakingTemps, 0.15, 0.6)
+  const pmtStab = stabilityScore(postMealTemps, 0.15, 0.6)
+  const wpStab = stabilityScore(wakingPulses, 3, 12)
+  const pmpStab = stabilityScore(postMealPulses, 3, 12)
+  const stabilityScore_ = (wtStab + pmtStab + wpStab + pmpStab) / 4
+
+  const gqRaw = 100 * (0.35 * tempScore + 0.35 * pulseScore + 0.3 * stabilityScore_)
+  const gqScore = Math.max(0, Math.min(100, Math.round(gqRaw)))
+
+  const gqTier: GQTier =
+    gqScore >= 90 ? 'Ascending' : gqScore >= 70 ? 'Kindling' : 'Dormant'
+
+  // 7-day pattern label
+  const recent7WT = wakingTemps.slice(-7)
+  const recent7PMT = postMealTemps.slice(-7)
+  const recent7WP = wakingPulses.slice(-7)
+  const recent7PMP = postMealPulses.slice(-7)
+
+  const avgWT7 = avg(recent7WT)
+  const avgPMT7 = avg(recent7PMT)
+  const avgWP7 = avg(recent7WP)
+  const avgPMP7 = avg(recent7PMP)
+
+  const tempSd7 = (stdDev(recent7WT) + stdDev(recent7PMT)) / 2
+  const pulseSd7 = (stdDev(recent7WP) + stdDev(recent7PMP)) / 2
+
+  let patternLabel: PatternLabel
+  const tempWarm = avgWT7 >= 36.4 && avgPMT7 >= 36.7
+  const pulseFast = avgWP7 > 85 || avgPMP7 > 90
+  const pulseCalm = avgWP7 >= 68 && avgWP7 <= 85 && avgPMP7 >= 75 && avgPMP7 <= 88
+  const tempStable = tempSd7 < 0.3 && pulseSd7 < 6
+
+  if (tempWarm && pulseCalm && tempStable) {
+    patternLabel = 'Warm & Steady'
+  } else if (pulseFast) {
+    patternLabel = 'Hot but Wired'
+  } else {
+    patternLabel = 'Cold & Slow'
+  }
+
+  return {
+    gqScore,
+    gqTier,
+    patternLabel,
+    entryCount: slice.length,
+    windowDays,
+    avgWakingTemp: avg(wakingTemps),
+    avgPostMealTemp: avg(postMealTemps),
+    avgWakingPulse: avg(wakingPulses),
+    avgPostMealPulse: avg(postMealPulses),
+  }
+}
+
+export function tierColor(tier: GQTier): string {
+  if (tier === 'Ascending') return '#7AAE7A'
+  if (tier === 'Kindling') return '#C9922A'
+  return '#6B7280'
+}
+
+export function tierTagline(tier: GQTier): string {
+  if (tier === 'Ascending') return 'Warm, steady, alive. The fire holds.'
+  if (tier === 'Kindling') return 'Heat is building. The fire is catching.'
+  return "The fire hasn't caught yet. Keep showing up."
+}
+'use client'
+
+import { useState } from 'react'
+import { createBrowserClient } from '@supabase/ssr'
+import { useRouter } from 'next/navigation'
+
+const supabase = createBrowserClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
+
+export default function LoginPage() {
+  const router = useRouter()
+  const [mode, setMode] = useState<'signin' | 'signup'>('signin')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [magicSent, setMagicSent] = useState(false)
+  const [useMagic, setUseMagic] = useState(false)
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
+
+    try {
+      if (useMagic) {
+        const { error } = await supabase.auth.signInWithOtp({
+          email,
+          options: { emailRedirectTo: `${window.location.origin}/app` },
+        })
+        if (error) throw error
+        setMagicSent(true)
+      } else if (mode === 'signup') {
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { emailRedirectTo: `${window.location.origin}/app` },
+        })
+        if (error) throw error
+        router.push('/onboarding')
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password })
+        if (error) throw error
+        router.push('/app')
+      }
+    } catch (err: any) {
+      setError(err.message ?? 'Something went wrong.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div
+      style={{
+        minHeight: '100vh',
+        background: '#0d1117',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '24px 16px',
+        fontFamily: '"Inter", system-ui, sans-serif',
+      }}
+    >
+      {/* Brand mark */}
+      <div style={{ marginBottom: 48, textAlign: 'center' }}>
+        <div
+          style={{
+            width: 52,
+            height: 52,
+            borderRadius: '50%',
+            border: '2px solid #C9922A',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 16px',
+            background: 'rgba(201,146,42,0.08)',
+          }}
+        >
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+            <path
+              d="M11 2 L11 11 M11 11 L7 7 M11 11 L15 7"
+              stroke="#C9922A"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <circle cx="11" cy="11" r="9" stroke="#C9922A" strokeWidth="1.2" opacity="0.4" />
+          </svg>
+        </div>
+        <div
+          style={{
+            fontFamily: '"Georgia", serif',
+            fontSize: 22,
+            fontWeight: 400,
+            letterSpacing: '0.12em',
+            color: '#E8DCC8',
+            textTransform: 'uppercase',
+          }}
+        >
+          Ascentgen
+        </div>
+        <div style={{ fontSize: 13, color: '#6B7280', marginTop: 6, letterSpacing: '0.04em' }}>
+          Track heat. Track rhythm. Ascend.
+        </div>
+      </div>
+
+      {/* Card */}
+      <div
+        style={{
+          width: '100%',
+          maxWidth: 420,
+          background: '#111827',
+          border: '1px solid #1e2330',
+          borderRadius: 12,
+          padding: '36px 32px',
+        }}
+      >
+        {magicSent ? (
+          <div style={{ textAlign: 'center', padding: '16px 0' }}>
+            <div style={{ fontSize: 32, marginBottom: 16 }}>✉️</div>
+            <div style={{ color: '#E8DCC8', fontSize: 16, marginBottom: 8 }}>
+              Check your inbox
+            </div>
+            <div style={{ color: '#6B7280', fontSize: 14, lineHeight: 1.6 }}>
+              A sign-in link is on its way to <strong style={{ color: '#C9922A' }}>{email}</strong>.
+              Follow it to enter the dashboard.
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Tab toggle */}
+            <div
+              style={{
+                display: 'flex',
+                background: '#0d1117',
+                borderRadius: 8,
+                padding: 3,
+                marginBottom: 28,
+              }}
+            >
+              {(['signin', 'signup'] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => { setMode(m); setError(null) }}
+                  style={{
+                    flex: 1,
+                    padding: '8px 0',
+                    background: mode === m ? '#1a2235' : 'transparent',
+                    border: mode === m ? '1px solid #1e2330' : '1px solid transparent',
+                    borderRadius: 6,
+                    color: mode === m ? '#E8DCC8' : '#6B7280',
+                    fontSize: 13,
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  {m === 'signin' ? 'Sign In' : 'Create Account'}
+                </button>
+              ))}
+            </div>
+
+            <form onSubmit={handleSubmit}>
+              <div style={{ marginBottom: 16 }}>
+                <label style={labelStyle}>Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  placeholder="your@email.com"
+                  style={inputStyle}
+                />
+              </div>
+
+              {!useMagic && (
+                <div style={{ marginBottom: 24 }}>
+                  <label style={labelStyle}>Password</label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    placeholder="••••••••"
+                    style={inputStyle}
+                  />
+                </div>
+              )}
+
+              {error && (
+                <div
+                  style={{
+                    background: 'rgba(239,68,68,0.08)',
+                    border: '1px solid rgba(239,68,68,0.2)',
+                    borderRadius: 6,
+                    padding: '10px 12px',
+                    color: '#f87171',
+                    fontSize: 13,
+                    marginBottom: 16,
+                  }}
+                >
+                  {error}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                style={{
+                  width: '100%',
+                  padding: '13px 0',
+                  background: loading ? '#8a6420' : '#C9922A',
+                  border: 'none',
+                  borderRadius: 8,
+                  color: '#0d1117',
+                  fontSize: 14,
+                  fontWeight: 600,
+                  letterSpacing: '0.04em',
+                  cursor: loading ? 'not-allowed' : 'pointer',
+                  transition: 'background 0.2s',
+                }}
+              >
+                {loading
+                  ? 'One moment...'
+                  : useMagic
+                  ? 'Send Magic Link'
+                  : mode === 'signup'
+                  ? 'Begin Your Ascent'
+                  : 'Enter Dashboard'}
+              </button>
+            </form>
+
+            <div style={{ marginTop: 20, textAlign: 'center' }}>
+              <button
+                onClick={() => { setUseMagic(!useMagic); setError(null) }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#6B7280',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                }}
+              >
+                {useMagic ? 'Use password instead' : 'Sign in with magic link (no password)'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div style={{ marginTop: 32, color: '#6B7280', fontSize: 11, letterSpacing: '0.06em' }}>
+        ASCENTGEN · METABOLIC INTELLIGENCE
+      </div>
+    </div>
+  )
+}
+
+const labelStyle: React.CSSProperties = {
+  display: 'block',
+  fontSize: 11,
+  fontWeight: 600,
+  letterSpacing: '0.08em',
+  textTransform: 'uppercase',
+  color: '#6B7280',
+  marginBottom: 6,
+}
+
+const inputStyle: React.CSSProperties = {
+  width: '100%',
+  boxSizing: 'border-box',
+  padding: '11px 14px',
+  background: '#0d1117',
+  border: '1px solid #1e2330',
+  borderRadius: 7,
+  color: '#E8DCC8',
+  fontSize: 14,
+  outline: 'none',
+}
+'use client'
+
+import { useState } from 'react'
+import { createBrowserClient } from '@supabase/ssr'
+import { useRouter } from 'next/navigation'
+
+const supabase = createBrowserClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
+
+const STEPS = [
+  {
+    id: 'welcome',
+    heading: 'Your ascent begins here.',
+    sub: 'Ascentgen tracks four readings — waking temperature, post-meal temperature, waking pulse, post-meal pulse — and turns them into your Generative Quotient (GQ).',
+  },
+  {
+    id: 'how',
+    heading: 'What you\'ll do each day.',
+    sub: 'Once per morning and once after your largest meal, record your temp and pulse. That\'s it. Seven days and your GQ emerges.',
+  },
+  {
+    id: 'units',
+    heading: 'Which temperature unit do you use?',
+    sub: 'All scoring runs in Celsius internally. Pick what\'s on your thermometer.',
+  },
+  {
+    id: 'ready',
+    heading: 'The dashboard is yours.',
+    sub: 'Lock in today\'s readings and your ascent is underway.',
+  },
+]
+
+export default function OnboardingPage() {
+  const router = useRouter()
+  const [step, setStep] = useState(0)
+  const [unit, setUnit] = useState<'F' | 'C'>('F')
+  const [saving, setSaving] = useState(false)
+
+  async function finish() {
+    setSaving(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      await supabase
+        .from('profiles')
+        .upsert({
+          id: user.id,
+          temperature_unit: unit,
+          onboarding_complete: true,
+        })
+    }
+    router.push('/app')
+  }
+
+  const current = STEPS[step]
+  const isLast = step === STEPS.length - 1
+  const progress = ((step + 1) / STEPS.length) * 100
+
+  return (
+    <div
+      style={{
+        minHeight: '100vh',
+        background: '#0d1117',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '24px 16px',
+        fontFamily: '"Inter", system-ui, sans-serif',
+      }}
+    >
+      {/* Progress bar */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 3,
+          background: '#1e2330',
+        }}
+      >
+        <div
+          style={{
+            height: '100%',
+            width: `${progress}%`,
+            background: '#C9922A',
+            transition: 'width 0.4s ease',
+          }}
+        />
+      </div>
+
+      {/* Step indicator */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 48 }}>
+        {STEPS.map((_, i) => (
+          <div
+            key={i}
+            style={{
+              width: i === step ? 24 : 8,
+              height: 8,
+              borderRadius: 4,
+              background: i <= step ? '#C9922A' : '#1e2330',
+              transition: 'all 0.3s ease',
+            }}
+          />
+        ))}
+      </div>
+
+      {/* Content card */}
+      <div
+        style={{
+          width: '100%',
+          maxWidth: 480,
+          background: '#111827',
+          border: '1px solid #1e2330',
+          borderRadius: 14,
+          padding: '48px 36px',
+          textAlign: 'center',
+        }}
+      >
+        {/* Icon per step */}
+        <div style={{ fontSize: 40, marginBottom: 24 }}>
+          {step === 0 && '🔥'}
+          {step === 1 && '🌡️'}
+          {step === 2 && '⚙️'}
+          {step === 3 && '✅'}
+        </div>
+
+        <h1
+          style={{
+            fontFamily: '"Georgia", serif',
+            fontSize: 26,
+            fontWeight: 400,
+            color: '#E8DCC8',
+            marginBottom: 16,
+            lineHeight: 1.3,
+          }}
+        >
+          {current.heading}
+        </h1>
+
+        <p
+          style={{
+            fontSize: 15,
+            color: '#6B7280',
+            lineHeight: 1.7,
+            marginBottom: 36,
+          }}
+        >
+          {current.sub}
+        </p>
+
+        {/* Unit selector on step 2 */}
+        {step === 2 && (
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginBottom: 36 }}>
+            {(['F', 'C'] as const).map((u) => (
+              <button
+                key={u}
+                onClick={() => setUnit(u)}
+                style={{
+                  width: 120,
+                  padding: '16px 0',
+                  background: unit === u ? 'rgba(201,146,42,0.12)' : '#0d1117',
+                  border: unit === u ? '1px solid #C9922A' : '1px solid #1e2330',
+                  borderRadius: 10,
+                  color: unit === u ? '#C9922A' : '#6B7280',
+                  fontSize: 22,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                }}
+              >
+                °{u}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* How-to diagram on step 1 */}
+        {step === 1 && (
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'center',
+              gap: 16,
+              marginBottom: 36,
+            }}
+          >
+            {[
+              { icon: '🌅', label: 'Morning', sub: 'Before eating\nor moving' },
+              { icon: '🍽️', label: 'Post-meal', sub: '90 min after\nyour main meal' },
+            ].map((item) => (
+              <div
+                key={item.label}
+                style={{
+                  flex: 1,
+                  maxWidth: 140,
+                  background: '#0d1117',
+                  border: '1px solid #1e2330',
+                  borderRadius: 10,
+                  padding: '16px 12px',
+                  textAlign: 'center',
+                }}
+              >
+                <div style={{ fontSize: 28, marginBottom: 8 }}>{item.icon}</div>
+                <div style={{ color: '#E8DCC8', fontSize: 13, fontWeight: 600 }}>
+                  {item.label}
+                </div>
+                <div
+                  style={{
+                    color: '#6B7280',
+                    fontSize: 11,
+                    marginTop: 4,
+                    whiteSpace: 'pre-line',
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {item.sub}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* CTA */}
+        <button
+          onClick={isLast ? finish : () => setStep(step + 1)}
+          disabled={saving}
+          style={{
+            width: '100%',
+            padding: '14px 0',
+            background: saving ? '#8a6420' : '#C9922A',
+            border: 'none',
+            borderRadius: 9,
+            color: '#0d1117',
+            fontSize: 14,
+            fontWeight: 700,
+            letterSpacing: '0.04em',
+            cursor: saving ? 'not-allowed' : 'pointer',
+            transition: 'background 0.2s',
+          }}
+        >
+          {saving
+            ? 'Setting up your dashboard...'
+            : isLast
+            ? 'Enter the Dashboard →'
+            : 'Continue'}
+        </button>
+
+        {step > 0 && (
+          <button
+            onClick={() => setStep(step - 1)}
+            style={{
+              marginTop: 14,
+              background: 'none',
+              border: 'none',
+              color: '#6B7280',
+              fontSize: 12,
+              cursor: 'pointer',
+            }}
+          >
+            ← Back
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+import { redirect } from 'next/navigation'
+import { createClient } from '@/lib/supabase/server'
+import { computeGQ, tierColor, tierTagline, type GQTier } from '@/lib/gq'
+import TodayCheckInForm from './TodayCheckInForm'
+import RecentEntries from './RecentEntries'
+import DashboardClient from './DashboardClient'
+
+export default async function AppPage() {
+  const supabase = createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) redirect('/login')
+
+  // Load profile
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('temperature_unit, onboarding_complete')
+    .eq('id', user.id)
+    .single()
+
+  if (!profile?.onboarding_complete) redirect('/onboarding')
+
+  const unit = (profile?.temperature_unit ?? 'F') as 'F' | 'C'
+
+  // Load last 90 days of entries
+  const ninetyDaysAgo = new Date()
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90)
+
+  const { data: entries } = await supabase
+    .from('daily_entries')
+    .select('*')
+    .eq('user_id', user.id)
+    .gte('date', ninetyDaysAgo.toISOString().split('T')[0])
+    .order('date', { ascending: true })
+
+  const allEntries = entries ?? []
+
+  // Today's entry
+  const todayStr = new Date().toISOString().split('T')[0]
+  const todayEntry = allEntries.find((e) => e.date === todayStr) ?? null
+
+  // GQ
+  const gqResult = computeGQ(allEntries, 14)
+
+  // Streak: consecutive days with entries ending today or yesterday
+  function computeStreak(): number {
+    if (allEntries.length === 0) return 0
+    const dates = new Set(allEntries.map((e) => e.date))
+    let streak = 0
+    const d = new Date()
+    // allow today or yesterday as the anchor
+    if (!dates.has(d.toISOString().split('T')[0])) {
+      d.setDate(d.getDate() - 1)
+    }
+    while (true) {
+      const ds = d.toISOString().split('T')[0]
+      if (dates.has(ds)) {
+        streak++
+        d.setDate(d.getDate() - 1)
+      } else {
+        break
+      }
+    }
+    return streak
+  }
+
+  const streak = computeStreak()
+  const totalEntries = allEntries.length
+  const daysUntilGQ = Math.max(0, 7 - totalEntries)
+
+  return (
+    <DashboardClient
+      userId={user.id}
+      unit={unit}
+      todayEntry={todayEntry}
+      entries={allEntries.slice(-14).reverse()}
+      gqResult={gqResult}
+      streak={streak}
+      totalEntries={totalEntries}
+      daysUntilGQ={daysUntilGQ}
+      todayStr={todayStr}
+    />
+  )
+}'use client'
+
+import { useState } from 'react'
+import TodayCheckInForm from './TodayCheckInForm'
+import RecentEntries from './RecentEntries'
+import { type GQResult, type GQTier, tierColor, tierTagline } from '@/lib/gq'
+
+interface Props {
+  userId: string
+  unit: 'F' | 'C'
+  todayEntry: any
+  entries: any[]
+  gqResult: GQResult | null
+  streak: number
+  totalEntries: number
+  daysUntilGQ: number
+  todayStr: string
+}
+
+// Animated arc gauge for GQ
+function GQArc({ score, tier }: { score: number; tier: GQTier }) {
+  const color = tierColor(tier)
+  const r = 80
+  const cx = 110
+  const cy = 110
+  const startAngle = -210
+  const totalArc = 240
+  const angle = startAngle + (score / 100) * totalArc
+
+  function polarToXY(angleDeg: number, radius: number) {
+    const rad = (angleDeg * Math.PI) / 180
+    return {
+      x: cx + radius * Math.cos(rad),
+      y: cy + radius * Math.sin(rad),
+    }
+  }
+
+  function describeArc(startDeg: number, endDeg: number, rad: number) {
+    const s = polarToXY(startDeg, rad)
+    const e = polarToXY(endDeg, rad)
+    const largeArc = endDeg - startDeg > 180 ? 1 : 0
+    return `M ${s.x} ${s.y} A ${rad} ${rad} 0 ${largeArc} 1 ${e.x} ${e.y}`
+  }
+
+  const endAngle = startAngle + (score / 100) * totalArc
+
+  return (
+    <svg width={220} height={200} viewBox="0 0 220 200" style={{ overflow: 'visible' }}>
+      {/* Track */}
+      <path
+        d={describeArc(startAngle, startAngle + totalArc, r)}
+        fill="none"
+        stroke="#1e2330"
+        strokeWidth={14}
+        strokeLinecap="round"
+      />
+      {/* Filled arc */}
+      <path
+        d={describeArc(startAngle, endAngle, r)}
+        fill="none"
+        stroke={color}
+        strokeWidth={14}
+        strokeLinecap="round"
+        style={{
+          filter: `drop-shadow(0 0 8px ${color}60)`,
+        }}
+      />
+      {/* Score */}
+      <text
+        x={cx}
+        y={cy - 6}
+        textAnchor="middle"
+        fill={color}
+        fontSize={48}
+        fontWeight={700}
+        fontFamily="'Inter', system-ui, sans-serif"
+      >
+        {score}
+      </text>
+      <text
+        x={cx}
+        y={cy + 20}
+        textAnchor="middle"
+        fill="#6B7280"
+        fontSize={11}
+        fontWeight={600}
+        letterSpacing="0.12em"
+        fontFamily="'Inter', system-ui, sans-serif"
+      >
+        GQ SCORE
+      </text>
+    </svg>
+  )
+}
+
+// Locked GQ teaser (empty state)
+function GQTeaser({ daysUntilGQ, totalEntries }: { daysUntilGQ: number; totalEntries: number }) {
+  const dots = Array.from({ length: 7 }, (_, i) => i < totalEntries)
+
+  return (
+    <div
+      style={{
+        background: '#111827',
+        border: '1px solid #1e2330',
+        borderRadius: 14,
+        padding: '36px 24px',
+        textAlign: 'center',
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Blurred ghost score */}
+      <div
+        style={{
+          fontSize: 80,
+          fontWeight: 700,
+          color: '#C9922A',
+          opacity: 0.08,
+          filter: 'blur(8px)',
+          lineHeight: 1,
+          userSelect: 'none',
+          marginBottom: -20,
+        }}
+      >
+        ??
+      </div>
+
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: '0.12em',
+          textTransform: 'uppercase',
+          color: '#C9922A',
+          marginBottom: 10,
+        }}
+      >
+        Your GQ Emerges In
+      </div>
+      <div
+        style={{
+          fontFamily: '"Georgia", serif',
+          fontSize: 32,
+          color: '#E8DCC8',
+          marginBottom: 20,
+        }}
+      >
+        {daysUntilGQ} day{daysUntilGQ !== 1 ? 's' : ''}
+      </div>
+
+      {/* Dot tracker */}
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginBottom: 20 }}>
+        {dots.map((filled, i) => (
+          <div
+            key={i}
+            style={{
+              width: 12,
+              height: 12,
+              borderRadius: '50%',
+              background: filled ? '#C9922A' : '#1e2330',
+              border: filled ? 'none' : '1px solid #1e2330',
+              boxShadow: filled ? '0 0 6px rgba(201,146,42,0.5)' : 'none',
+              transition: 'all 0.3s',
+            }}
+          />
+        ))}
+      </div>
+
+      <p style={{ color: '#6B7280', fontSize: 13, lineHeight: 1.7, maxWidth: 300, margin: '0 auto' }}>
+        Seven days and your Generative Quotient emerges. Your ascent begins with one reading.
+      </p>
+    </div>
+  )
+}
+
+// Tier progression bar
+function TierBar({ gqScore }: { gqScore: number }) {
+  const tiers = [
+    { label: 'Dormant', range: '0–69', color: '#6B7280', max: 69 },
+    { label: 'Kindling', range: '70–89', color: '#C9922A', max: 89 },
+    { label: 'Ascending', range: '90–100', color: '#7AAE7A', max: 100 },
+  ]
+
+  const currentTierIdx =
+    gqScore >= 90 ? 2 : gqScore >= 70 ? 1 : 0
+
+  return (
+    <div
+      style={{
+        background: '#111827',
+        border: '1px solid #1e2330',
+        borderRadius: 12,
+        padding: '20px 24px',
+      }}
+    >
+      <div style={{ display: 'flex', gap: 4 }}>
+        {tiers.map((t, i) => (
+          <div key={t.label} style={{ flex: i === 2 ? 1 : i === 1 ? 1.5 : 5.6, minWidth: 0 }}>
+            <div
+              style={{
+                height: 6,
+                borderRadius: 3,
+                background: i <= currentTierIdx ? t.color : '#1e2330',
+                transition: 'background 0.4s',
+                opacity: i < currentTierIdx ? 0.5 : 1,
+              }}
+            />
+            <div
+              style={{
+                marginTop: 6,
+                fontSize: 10,
+                fontWeight: i === currentTierIdx ? 700 : 500,
+                color: i === currentTierIdx ? t.color : '#6B7280',
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+              }}
+            >
+              {t.label}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// Pro-locked charts overlay
+function ProLockedCharts() {
+  return (
+    <div
+      style={{
+        background: '#111827',
+        border: '1px solid #1e2330',
+        borderRadius: 12,
+        padding: '28px 24px',
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+    >
+      <h2
+        style={{
+          fontFamily: '"Georgia", serif',
+          fontSize: 16,
+          fontWeight: 400,
+          color: '#E8DCC8',
+          marginBottom: 20,
+        }}
+      >
+        Trends
+      </h2>
+
+      {/* Ghost chart bars */}
+      <div
+        style={{
+          display: 'flex',
+          gap: 4,
+          alignItems: 'flex-end',
+          height: 80,
+          marginBottom: 16,
+          opacity: 0.15,
+          filter: 'blur(2px)',
+        }}
+      >
+        {[60, 75, 55, 80, 70, 85, 65, 90, 72, 68, 82, 78, 88, 76].map((h, i) => (
+          <div
+            key={i}
+            style={{
+              flex: 1,
+              height: `${h}%`,
+              background: '#C9922A',
+              borderRadius: '2px 2px 0 0',
+            }}
+          />
+        ))}
+      </div>
+
+      {/* Lock overlay */}
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'linear-gradient(to bottom, transparent 30%, #111827 70%)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          padding: '24px',
+        }}
+      >
+        <div
+          style={{
+            textAlign: 'center',
+            background: '#1a2235',
+            border: '1px solid #1e2330',
+            borderRadius: 10,
+            padding: '16px 24px',
+            width: '100%',
+            maxWidth: 260,
+          }}
+        >
+          <div style={{ fontSize: 20, marginBottom: 8 }}>🔒</div>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: '#E8DCC8',
+              marginBottom: 6,
+            }}
+          >
+            Trend charts — Pro
+          </div>
+          <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 12, lineHeight: 1.5 }}>
+            Unlock 14–90 day trend lines and GQ history.
+          </div>
+          <button
+            style={{
+              width: '100%',
+              padding: '10px 0',
+              background: '#C9922A',
+              border: 'none',
+              borderRadius: 7,
+              color: '#0d1117',
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: '0.05em',
+              cursor: 'pointer',
+            }}
+          >
+            Upgrade to Pro
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default function DashboardClient({
+  userId,
+  unit,
+  todayEntry,
+  entries,
+  gqResult,
+  streak,
+  totalEntries,
+  daysUntilGQ,
+  todayStr,
+}: Props) {
+  const [refreshKey, setRefreshKey] = useState(0)
+
+  const tier = gqResult?.gqTier ?? null
+  const tierC = tier ? tierColor(tier) : '#6B7280'
+
+  const today = new Date()
+  const dateDisplay = today.toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  })
+
+  return (
+    <div
+      style={{
+        minHeight: '100vh',
+        background: '#0d1117',
+        fontFamily: '"Inter", system-ui, sans-serif',
+        color: '#E8DCC8',
+      }}
+    >
+      {/* Header */}
+      <div
+        style={{
+          borderBottom: '1px solid #1e2330',
+          padding: '16px 24px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          position: 'sticky',
+          top: 0,
+          background: '#0d1117',
+          zIndex: 10,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: '50%',
+              border: '1.5px solid #C9922A',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'rgba(201,146,42,0.08)',
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path
+                d="M7 1 L7 7 M7 7 L4 4 M7 7 L10 4"
+                stroke="#C9922A"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <circle cx="7" cy="7" r="5.5" stroke="#C9922A" strokeWidth="1" opacity="0.4" />
+            </svg>
+          </div>
+          <span
+            style={{
+              fontFamily: '"Georgia", serif',
+              fontSize: 16,
+              letterSpacing: '0.1em',
+              color: '#E8DCC8',
+              textTransform: 'uppercase',
+            }}
+          >
+            Ascentgen
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {/* Streak pill */}
+          {streak > 0 && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                background: 'rgba(201,146,42,0.1)',
+                border: '1px solid rgba(201,146,42,0.3)',
+                borderRadius: 20,
+                padding: '4px 10px',
+                fontSize: 12,
+                color: '#C9922A',
+                fontWeight: 600,
+              }}
+            >
+              🔥 {streak}
+            </div>
+          )}
+          {tier && (
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+                color: tierC,
+                background: `${tierC}18`,
+                border: `1px solid ${tierC}40`,
+                borderRadius: 20,
+                padding: '4px 12px',
+              }}
+            >
+              {tier}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Main content */}
+      <div
+        style={{
+          maxWidth: 640,
+          margin: '0 auto',
+          padding: '24px 16px 80px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16,
+        }}
+      >
+        {/* Date */}
+        <div style={{ color: '#6B7280', fontSize: 13 }}>{dateDisplay}</div>
+
+        {/* GQ HERO */}
+        {gqResult ? (
+          <div
+            style={{
+              background: '#111827',
+              border: `1px solid #1e2330`,
+              borderRadius: 14,
+              padding: '32px 24px',
+              textAlign: 'center',
+              position: 'relative',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Subtle glow behind arc */}
+            <div
+              style={{
+                position: 'absolute',
+                top: -40,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                width: 200,
+                height: 200,
+                borderRadius: '50%',
+                background: `radial-gradient(circle, ${tierC}20 0%, transparent 70%)`,
+                pointerEvents: 'none',
+              }}
+            />
+
+            <GQArc score={gqResult.gqScore} tier={gqResult.gqTier} />
+
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: '0.12em',
+                textTransform: 'uppercase',
+                color: tierC,
+                marginTop: 4,
+                marginBottom: 8,
+              }}
+            >
+              {gqResult.gqTier}
+            </div>
+
+            <div
+              style={{
+                fontFamily: '"Georgia", serif',
+                fontSize: 18,
+                color: '#E8DCC8',
+                marginBottom: 6,
+              }}
+            >
+              {gqResult.patternLabel}
+            </div>
+
+            <div style={{ color: '#6B7280', fontSize: 13, lineHeight: 1.6 }}>
+              {tierTagline(gqResult.gqTier)}
+            </div>
+
+            {/* Metric pills */}
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+                justifyContent: 'center',
+                flexWrap: 'wrap',
+                marginTop: 20,
+              }}
+            >
+              {[
+                {
+                  label: 'Wk Temp',
+                  val: gqResult.avgWakingTemp?.toFixed(1),
+                  suffix: '°C avg',
+                },
+                {
+                  label: 'PM Temp',
+                  val: gqResult.avgPostMealTemp?.toFixed(1),
+                  suffix: '°C avg',
+                },
+                {
+                  label: 'Wk Pulse',
+                  val: gqResult.avgWakingPulse?.toFixed(0),
+                  suffix: 'bpm avg',
+                },
+                {
+                  label: 'PM Pulse',
+                  val: gqResult.avgPostMealPulse?.toFixed(0),
+                  suffix: 'bpm avg',
+                },
+              ].map((m) => (
+                <div
+                  key={m.label}
+                  style={{
+                    background: '#0d1117',
+                    border: '1px solid #1e2330',
+                    borderRadius: 8,
+                    padding: '8px 12px',
+                    textAlign: 'center',
+                  }}
+                >
+                  <div style={{ fontSize: 10, color: '#6B7280', letterSpacing: '0.06em' }}>
+                    {m.label}
+                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: '#E8DCC8', marginTop: 2 }}>
+                    {m.val ?? '—'}{' '}
+                    <span style={{ fontSize: 10, color: '#6B7280', fontWeight: 400 }}>{m.suffix}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <GQTeaser daysUntilGQ={daysUntilGQ} totalEntries={totalEntries} />
+        )}
+
+        {/* Tier bar (only when GQ exists) */}
+        {gqResult && <TierBar gqScore={gqResult.gqScore} />}
+
+        {/* Today's check-in */}
+        <TodayCheckInForm
+          key={refreshKey}
+          userId={userId}
+          defaultUnit={unit}
+          existingEntry={todayEntry}
+          onSaved={() => setRefreshKey((k) => k + 1)}
+        />
+
+        {/* Recent entries */}
+        <RecentEntries entries={entries} />
+
+        {/* Pro-locked charts */}
+        <ProLockedCharts />
+      </div>
+    </div>
+  )
+}
+'use client'
+
+import { useState } from 'react'
+import { createBrowserClient } from '@supabase/ssr'
+
+const supabase = createBrowserClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
+
+interface Props {
+  userId: string
+  defaultUnit: 'F' | 'C'
+  existingEntry?: {
+    waking_temp_value?: number | null
+    waking_temp_unit?: string
+    waking_pulse_bpm?: number | null
+    post_meal_temp_value?: number | null
+    post_meal_temp_unit?: string
+    post_meal_pulse_bpm?: number | null
+    notes?: string | null
+  } | null
+  onSaved?: () => void
+}
+
+export default function TodayCheckInForm({ userId, defaultUnit, existingEntry, onSaved }: Props) {
+  const todayStr = new Date().toISOString().split('T')[0]
+
+  const [wt, setWt] = useState(existingEntry?.waking_temp_value?.toString() ?? '')
+  const [wtUnit, setWtUnit] = useState<'F' | 'C'>(
+    (existingEntry?.waking_temp_unit as 'F' | 'C') ?? defaultUnit
+  )
+  const [wp, setWp] = useState(existingEntry?.waking_pulse_bpm?.toString() ?? '')
+  const [pmt, setPmt] = useState(existingEntry?.post_meal_temp_value?.toString() ?? '')
+  const [pmtUnit, setPmtUnit] = useState<'F' | 'C'>(
+    (existingEntry?.post_meal_temp_unit as 'F' | 'C') ?? defaultUnit
+  )
+  const [pmp, setPmp] = useState(existingEntry?.post_meal_pulse_bpm?.toString() ?? '')
+  const [notes, setNotes] = useState(existingEntry?.notes ?? '')
+  const [loading, setLoading] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
+
+    try {
+      const { error: upsertError } = await supabase.from('daily_entries').upsert(
+        {
+          user_id: userId,
+          date: todayStr,
+          waking_temp_value: wt ? parseFloat(wt) : null,
+          waking_temp_unit: wtUnit,
+          waking_pulse_bpm: wp ? parseInt(wp, 10) : null,
+          post_meal_temp_value: pmt ? parseFloat(pmt) : null,
+          post_meal_temp_unit: pmtUnit,
+          post_meal_pulse_bpm: pmp ? parseInt(pmp, 10) : null,
+          notes: notes || null,
+        },
+        { onConflict: 'user_id,date' }
+      )
+      if (upsertError) throw upsertError
+
+      setSaved(true)
+      setTimeout(() => setSaved(false), 3000)
+      onSaved?.()
+    } catch (err: any) {
+      setError(err.message ?? 'Failed to save. Try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div
+      style={{
+        background: '#111827',
+        border: '1px solid #1e2330',
+        borderRadius: 12,
+        padding: '28px 24px',
+      }}
+    >
+      <div style={{ marginBottom: 22 }}>
+        <h2 style={{ ...sectionTitle, marginBottom: 4 }}>Today's Check-In</h2>
+        <p style={{ color: '#6B7280', fontSize: 13 }}>
+          {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+        </p>
+      </div>
+
+      <form onSubmit={handleSubmit}>
+        {/* Row: Waking */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={groupLabel}>Waking readings</div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ flex: 1 }}>
+              <label style={fieldLabel}>Temperature</label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={wt}
+                  onChange={(e) => setWt(e.target.value)}
+                  placeholder={wtUnit === 'F' ? '97.8' : '36.6'}
+                  style={{ ...inputStyle, flex: 1 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setWtUnit(wtUnit === 'F' ? 'C' : 'F')}
+                  style={unitToggle}
+                >
+                  °{wtUnit}
+                </button>
+              </div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={fieldLabel}>Pulse (bpm)</label>
+              <input
+                type="number"
+                value={wp}
+                onChange={(e) => setWp(e.target.value)}
+                placeholder="75"
+                style={inputStyle}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Row: Post-meal */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={groupLabel}>Post-meal readings</div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ flex: 1 }}>
+              <label style={fieldLabel}>Temperature</label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={pmt}
+                  onChange={(e) => setPmt(e.target.value)}
+                  placeholder={pmtUnit === 'F' ? '98.6' : '37.0'}
+                  style={{ ...inputStyle, flex: 1 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setPmtUnit(pmtUnit === 'F' ? 'C' : 'F')}
+                  style={unitToggle}
+                >
+                  °{pmtUnit}
+                </button>
+              </div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={fieldLabel}>Pulse (bpm)</label>
+              <input
+                type="number"
+                value={pmp}
+                onChange={(e) => setPmp(e.target.value)}
+                placeholder="82"
+                style={inputStyle}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Notes */}
+        <div style={{ marginBottom: 24 }}>
+          <label style={fieldLabel}>Notes (optional)</label>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Sleep quality, stress, anything notable..."
+            rows={2}
+            style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
+          />
+        </div>
+
+        {error && (
+          <div
+            style={{
+              background: 'rgba(239,68,68,0.08)',
+              border: '1px solid rgba(239,68,68,0.2)',
+              borderRadius: 6,
+              padding: '8px 12px',
+              color: '#f87171',
+              fontSize: 13,
+              marginBottom: 14,
+            }}
+          >
+            {error}
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={loading}
+          style={{
+            width: '100%',
+            padding: '13px 0',
+            background: saved ? '#3d6b3d' : loading ? '#8a6420' : '#C9922A',
+            border: 'none',
+            borderRadius: 8,
+            color: saved ? '#7AAE7A' : '#0d1117',
+            fontSize: 14,
+            fontWeight: 700,
+            letterSpacing: '0.04em',
+            cursor: loading ? 'not-allowed' : 'pointer',
+            transition: 'all 0.2s',
+          }}
+        >
+          {saved ? '✓ Readings locked in' : loading ? 'Saving...' : 'Lock in today\'s readings'}
+        </button>
+      </form>
+    </div>
+  )
+}
+
+const sectionTitle: React.CSSProperties = {
+  fontSize: 16,
+  fontWeight: 600,
+  color: '#E8DCC8',
+  fontFamily: '"Georgia", serif',
+}
+
+const groupLabel: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 700,
+  letterSpacing: '0.1em',
+  textTransform: 'uppercase',
+  color: '#C9922A',
+  marginBottom: 10,
+}
+
+const fieldLabel: React.CSSProperties = {
+  display: 'block',
+  fontSize: 11,
+  fontWeight: 500,
+  color: '#6B7280',
+  marginBottom: 5,
+  letterSpacing: '0.04em',
+}
+
+const inputStyle: React.CSSProperties = {
+  width: '100%',
+  boxSizing: 'border-box',
+  padding: '10px 12px',
+  background: '#0d1117',
+  border: '1px solid #1e2330',
+  borderRadius: 7,
+  color: '#E8DCC8',
+  fontSize: 14,
+  outline: 'none',
+}
+
+const unitToggle: React.CSSProperties = {
+  padding: '0 14px',
+  background: '#1a2235',
+  border: '1px solid #1e2330',
+  borderRadius: 7,
+  color: '#C9922A',
+  fontSize: 13,
+  fontWeight: 700,
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
+}
+'use client'
+
+interface Entry {
+  id: string
+  date: string
+  waking_temp_value: number | null
+  waking_temp_unit: string
+  waking_pulse_bpm: number | null
+  post_meal_temp_value: number | null
+  post_meal_temp_unit: string
+  post_meal_pulse_bpm: number | null
+  notes: string | null
+}
+
+interface Props {
+  entries: Entry[]
+}
+
+function formatTemp(val: number | null, unit: string): string {
+  if (val == null) return '—'
+  return `${val.toFixed(1)}°${unit}`
+}
+
+function formatPulse(val: number | null): string {
+  if (val == null) return '—'
+  return `${val} bpm`
+}
+
+function formatDate(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00')
+  const today = new Date()
+  const yesterday = new Date()
+  yesterday.setDate(yesterday.getDate() - 1)
+
+  if (d.toDateString() === today.toDateString()) return 'Today'
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday'
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+export default function RecentEntries({ entries }: Props) {
+  if (entries.length === 0) {
+    return (
+      <div
+        style={{
+          background: '#111827',
+          border: '1px solid #1e2330',
+          borderRadius: 12,
+          padding: '28px 24px',
+          textAlign: 'center',
+        }}
+      >
+        <div style={{ color: '#6B7280', fontSize: 14, lineHeight: 1.7 }}>
+          No entries yet. Lock in your first reading above.
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      style={{
+        background: '#111827',
+        border: '1px solid #1e2330',
+        borderRadius: 12,
+        padding: '28px 24px',
+      }}
+    >
+      <h2
+        style={{
+          fontFamily: '"Georgia", serif',
+          fontSize: 16,
+          fontWeight: 400,
+          color: '#E8DCC8',
+          marginBottom: 20,
+        }}
+      >
+        Recent Entries
+      </h2>
+
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead>
+            <tr>
+              {['Date', 'Wake Temp', 'Wake Pulse', 'PM Temp', 'PM Pulse'].map((h) => (
+                <th
+                  key={h}
+                  style={{
+                    textAlign: 'left',
+                    padding: '0 12px 10px 0',
+                    color: '#6B7280',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    borderBottom: '1px solid #1e2330',
+                  }}
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {entries.slice(0, 14).map((entry, i) => (
+              <tr
+                key={entry.id}
+                style={{
+                  borderBottom: i < entries.length - 1 ? '1px solid rgba(30,35,48,0.6)' : 'none',
+                }}
+              >
+                <td style={{ ...tdStyle, color: '#E8DCC8', fontWeight: 500 }}>
+                  {formatDate(entry.date)}
+                </td>
+                <td style={tdStyle}>{formatTemp(entry.waking_temp_value, entry.waking_temp_unit)}</td>
+                <td style={tdStyle}>{formatPulse(entry.waking_pulse_bpm)}</td>
+                <td style={tdStyle}>{formatTemp(entry.post_meal_temp_value, entry.post_meal_temp_unit)}</td>
+                <td style={tdStyle}>{formatPulse(entry.post_meal_pulse_bpm)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+const tdStyle: React.CSSProperties = {
+  padding: '12px 12px 12px 0',
+  color: '#6B7280',
+  fontSize: 13,
+}
+{
+  "name": "ascentgen-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.10.2",
+    "@supabase/supabase-js": "^2.104.1",
+    "next": "16.2.4",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.4",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": ["./*"]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts",
+    "**/*.mts"
+  ],
+  "exclude": ["node_modules"]
+}

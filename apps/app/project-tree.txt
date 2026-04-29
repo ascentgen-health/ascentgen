@@ -1,0 +1,30 @@
+
+/Users/benjamin/Desktop/ascentgen-app
+├── .DS_Store
+├── .env.local
+├── .git
+├── .gitignore
+├── .netlify
+├── .next
+├── AGENTS.md
+├── CLAUDE.md
+├── README.md
+├── app
+├── eslint.config.mjs
+├── lib
+├── netlify.toml
+├── next-env.d.ts
+├── next.config.ts
+├── node_modules
+├── package-lock.json
+├── package.json
+├── postcss.config.mjs
+├── project-tree.txt
+├── public
+└── tsconfig.json
+
+directory: 7 file: 15
+
+
+
+[2K[1G
