@@ -50,6 +50,7 @@ function GQArc({ score, tier }: { score: number; tier: GQTier }) {
       viewBox="0 0 220 200"
       style={{ overflow: "visible" }}
     >
+      {/* Track */}
       <path
         d={describeArc(startAngle, startAngle + totalArc, r)}
         fill="none"
@@ -57,6 +58,7 @@ function GQArc({ score, tier }: { score: number; tier: GQTier }) {
         strokeWidth={14}
         strokeLinecap="round"
       />
+      {/* Filled arc */}
       <path
         d={describeArc(startAngle, endAngle, r)}
         fill="none"
@@ -65,6 +67,8 @@ function GQArc({ score, tier }: { score: number; tier: GQTier }) {
         strokeLinecap="round"
         style={{ filter: `drop-shadow(0 0 8px ${color}60)` }}
       />
+
+      {/* Score */}
       <text
         x={cx}
         y={cy - 6}
@@ -80,7 +84,7 @@ function GQArc({ score, tier }: { score: number; tier: GQTier }) {
         x={cx}
         y={cy + 20}
         textAnchor="middle"
-        fill="#6B7280"
+        fill="#9CA3AF"
         fontSize={11}
         fontWeight={600}
         letterSpacing="0.12em"
@@ -105,24 +109,25 @@ function GQTeaser({
     <div
       style={{
         background: "#111827",
-        border: "1px solid #1e2330",
-        borderRadius: 14,
-        padding: "36px 24px",
+        border: "1px solid #1f2933",
+        borderRadius: 16,
+        padding: "28px 24px 26px",
         textAlign: "center",
         position: "relative",
         overflow: "hidden",
       }}
     >
+      {/* Ghost score */}
       <div
         style={{
-          fontSize: 80,
+          fontSize: 82,
           fontWeight: 700,
           color: "#C9922A",
           opacity: 0.08,
           filter: "blur(8px)",
           lineHeight: 1,
           userSelect: "none",
-          marginBottom: -20,
+          marginBottom: -18,
         }}
       >
         ??
@@ -135,7 +140,7 @@ function GQTeaser({
           letterSpacing: "0.12em",
           textTransform: "uppercase",
           color: "#C9922A",
-          marginBottom: 10,
+          marginBottom: 6,
         }}
       >
         Your GQ Emerges In
@@ -144,9 +149,9 @@ function GQTeaser({
       <div
         style={{
           fontFamily: "Georgia, serif",
-          fontSize: 32,
-          color: "#E8DCC8",
-          marginBottom: 20,
+          fontSize: 30,
+          color: "#EDE4CE",
+          marginBottom: 14,
         }}
       >
         {daysUntilGQ} day{daysUntilGQ !== 1 ? "s" : ""}
@@ -155,13 +160,13 @@ function GQTeaser({
       <div
         style={{
           fontSize: 10,
-          color: "#6B7280",
+          color: "#9CA3AF",
           textTransform: "uppercase",
           letterSpacing: "0.08em",
-          marginBottom: 6,
+          marginBottom: 10,
         }}
       >
-        7-day spark tracker
+        Seven-day spark tracker
       </div>
 
       <div
@@ -169,7 +174,7 @@ function GQTeaser({
           display: "flex",
           gap: 10,
           justifyContent: "center",
-          marginBottom: 20,
+          marginBottom: 18,
         }}
       >
         {dots.map((filled, i) => (
@@ -178,11 +183,11 @@ function GQTeaser({
             style={{
               width: 12,
               height: 12,
-              borderRadius: 50,
-              background: filled ? "#C9922A" : "#1e2330",
-              border: filled ? "none" : "1px solid #1e2330",
+              borderRadius: 999,
+              background: filled ? "#C9922A" : "#0f172a",
+              border: filled ? "none" : "1px solid #1f2933",
               boxShadow: filled
-                ? "0 0 6px rgba(201,146,42,0.5)"
+                ? "0 0 6px rgba(201,146,42,0.55)"
                 : "none",
               transition: "all 0.3s",
             }}
@@ -192,7 +197,7 @@ function GQTeaser({
 
       <p
         style={{
-          color: "#6B7280",
+          color: "#9CA3AF",
           fontSize: 13,
           lineHeight: 1.7,
           maxWidth: 320,
@@ -208,9 +213,9 @@ function GQTeaser({
 
 function TierBar({ gqScore }: { gqScore: number }) {
   const tiers = [
-    { label: "Dormant", range: "0–69", color: "#6B7280", max: 69 },
-    { label: "Kindling", range: "70–89", color: "#C9922A", max: 89 },
-    { label: "Ascending", range: "90–100", color: "#7AAE7A", max: 100 },
+    { label: "Dormant", color: "#6B7280" },
+    { label: "Kindling", color: "#C9922A" },
+    { label: "Ascending", color: "#7AAE7A" },
   ] as const;
 
   const currentTierIdx =
@@ -220,9 +225,9 @@ function TierBar({ gqScore }: { gqScore: number }) {
     <div
       style={{
         background: "#111827",
-        border: "1px solid #1e2330",
-        borderRadius: 12,
-        padding: "20px 24px",
+        border: "1px solid #1f2933",
+        borderRadius: 16,
+        padding: "18px 22px 18px",
       }}
     >
       <div
@@ -231,27 +236,28 @@ function TierBar({ gqScore }: { gqScore: number }) {
           fontWeight: 700,
           letterSpacing: "0.1em",
           textTransform: "uppercase",
-          color: "#6B7280",
+          color: "#9CA3AF",
           marginBottom: 10,
         }}
       >
         Tier path
       </div>
+
       <div style={{ display: "flex", gap: 4 }}>
         {tiers.map((t, i) => (
           <div
             key={t.label}
             style={{
-              flex: i === 1 ? 1.5 : 1,
+              flex: i === 1 ? 1.6 : 1,
               minWidth: 0,
             }}
           >
             <div
               style={{
                 height: 6,
-                borderRadius: 3,
-                background: i <= currentTierIdx ? t.color : "#1e2330",
-                transition: "background 0.4s",
+                borderRadius: 999,
+                background: i <= currentTierIdx ? t.color : "#0f172a",
+                transition: "background 0.4s, opacity 0.4s",
                 opacity: i === currentTierIdx ? 1 : 0.5,
               }}
             />
@@ -279,9 +285,9 @@ function ProLockedCharts() {
     <div
       style={{
         background: "#111827",
-        border: "1px solid #1e2330",
-        borderRadius: 12,
-        padding: "28px 24px",
+        border: "1px solid #1f2933",
+        borderRadius: 16,
+        padding: "26px 22px",
         position: "relative",
         overflow: "hidden",
       }}
@@ -291,13 +297,14 @@ function ProLockedCharts() {
           fontFamily: "Georgia, serif",
           fontSize: 16,
           fontWeight: 400,
-          color: "#E8DCC8",
-          marginBottom: 20,
+          color: "#EDE4CE",
+          marginBottom: 18,
         }}
       >
         Trends
       </h2>
 
+      {/* Ghost bars */}
       <div
         style={{
           display: "flex",
@@ -305,7 +312,7 @@ function ProLockedCharts() {
           alignItems: "flex-end",
           height: 80,
           marginBottom: 16,
-          opacity: 0.15,
+          opacity: 0.16,
           filter: "blur(2px)",
         }}
       >
@@ -324,6 +331,7 @@ function ProLockedCharts() {
         )}
       </div>
 
+      {/* Lock overlay */}
       <div
         style={{
           position: "absolute",
@@ -340,20 +348,20 @@ function ProLockedCharts() {
         <div
           style={{
             textAlign: "center",
-            background: "#1a2235",
-            border: "1px solid #1e2330",
-            borderRadius: 10,
-            padding: "16px 24px",
+            background: "#050816",
+            border: "1px solid #1f2933",
+            borderRadius: 12,
+            padding: "16px 22px",
             width: "100%",
             maxWidth: 260,
           }}
         >
-          <div style={{ fontSize: 20, marginBottom: 8 }}>🔒</div>
+          <div style={{ fontSize: 20, marginBottom: 6 }}>🔒</div>
           <div
             style={{
               fontSize: 13,
               fontWeight: 600,
-              color: "#E8DCC8",
+              color: "#EDE4CE",
               marginBottom: 6,
             }}
           >
@@ -362,22 +370,22 @@ function ProLockedCharts() {
           <div
             style={{
               fontSize: 12,
-              color: "#6B7280",
-              marginBottom: 12,
-              lineHeight: 1.5,
+              color: "#9CA3AF",
+              marginBottom: 10,
+              lineHeight: 1.6,
             }}
           >
-            Unlock 14–90 day trend lines for temperature, pulse, and GQ
-            history.
+            Unlock 14–90 day trend lines and full GQ history as you keep
+            logging.
           </div>
           <button
             style={{
               width: "100%",
-              padding: "10px 0",
+              padding: "9px 0",
               background: "#C9922A",
               border: "none",
-              borderRadius: 7,
-              color: "#0d1117",
+              borderRadius: 8,
+              color: "#020617",
               fontSize: 12,
               fontWeight: 700,
               letterSpacing: "0.05em",
@@ -401,7 +409,6 @@ export default function DashboardClient({
   streak,
   totalEntries,
   daysUntilGQ,
-  todayStr,
 }: DashboardClientProps) {
   const [refreshKey, setRefreshKey] = useState(0);
   const tier = gqResult?.gqTier ?? null;
@@ -420,22 +427,23 @@ export default function DashboardClient({
     <div
       style={{
         minHeight: "100vh",
-        background: "#0d1117",
-        fontFamily: "Inter, system-ui, sans-serif",
-        color: "#E8DCC8",
+        background: "#06070E",
+        fontFamily: "Jost, system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
+        color: "#EDE4CE",
       }}
     >
-      {/* Header */}
-      <div
+      {/* HEADER */}
+      <header
         style={{
-          borderBottom: "1px solid #1e2330",
-          padding: "16px 24px",
+          borderBottom: "1px solid #1f2933",
+          padding: "14px 22px",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           position: "sticky",
           top: 0,
-          background: "#0d1117",
+          background: "rgba(6,7,14,0.96)",
+          backdropFilter: "blur(10px)",
           zIndex: 10,
         }}
       >
@@ -444,12 +452,14 @@ export default function DashboardClient({
             style={{
               width: 32,
               height: 32,
-              borderRadius: 50,
+              borderRadius: "999px",
               border: "1.5px solid #C9922A",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              background: "rgba(201,146,42,0.08)",
+              background: "rgba(201,146,42,0.06)",
+              boxShadow:
+                "0 0 12px rgba(200,132,26,0.45), 0 0 32px rgba(201,146,42,0.28)",
             }}
           >
             <svg
@@ -460,7 +470,7 @@ export default function DashboardClient({
             >
               <path
                 d="M7 1 L7 7 M7 7 L4 4 M7 7 L10 4"
-                stroke="#C9922A"
+                stroke="#E4A83C"
                 strokeWidth={1.5}
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -469,18 +479,18 @@ export default function DashboardClient({
                 cx={7}
                 cy={7}
                 r={5.5}
-                stroke="#C9922A"
+                stroke="#E4A83C"
                 strokeWidth={1}
-                opacity={0.4}
+                opacity={0.5}
               />
             </svg>
           </div>
           <div>
             <span
               style={{
-                fontFamily: "Georgia, serif",
+                fontFamily: "Cinzel, Georgia, serif",
                 fontSize: 16,
-                letterSpacing: "0.1em",
+                letterSpacing: "0.18em",
                 textTransform: "uppercase",
               }}
             >
@@ -489,9 +499,10 @@ export default function DashboardClient({
             <div
               style={{
                 fontSize: 11,
-                color: "#6B7280",
-                letterSpacing: "0.04em",
+                color: "rgba(237,228,206,0.65)",
+                letterSpacing: "0.06em",
                 marginTop: 2,
+                textTransform: "uppercase",
               }}
             >
               Track heat. Track rhythm. Ascend.
@@ -499,24 +510,26 @@ export default function DashboardClient({
           </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {/* Streak pill */}
           <div
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 5,
-              background: "rgba(201,146,42,0.1)",
-              border: "1px solid rgba(201,146,42,0.3)",
-              borderRadius: 20,
-              padding: "4px 10px",
+              gap: 6,
+              background: "rgba(201,146,42,0.10)",
+              border: "1px solid rgba(201,146,42,0.35)",
+              borderRadius: 999,
+              padding: "4px 11px",
               fontSize: 12,
-              color: "#C9922A",
+              color: "#E4A83C",
               fontWeight: 600,
             }}
           >
             <span>🔥</span>
-            <span>{streak} day{streak !== 1 ? "s" : ""}</span>
+            <span>
+              {streak} day{streak !== 1 ? "s" : ""}
+            </span>
           </div>
 
           {/* Tier pill */}
@@ -528,9 +541,9 @@ export default function DashboardClient({
                 letterSpacing: "0.1em",
                 textTransform: "uppercase",
                 color: tierC,
-                background: `${tierC}18`,
-                border: `1px solid ${tierC}40`,
-                borderRadius: 20,
+                background: `${tierC}1A`,
+                border: `1px solid ${tierC}55`,
+                borderRadius: 999,
                 padding: "4px 12px",
               }}
             >
@@ -538,51 +551,61 @@ export default function DashboardClient({
             </div>
           )}
         </div>
-      </div>
+      </header>
 
-      {/* Main content */}
-      <div
+      {/* MAIN CONTENT */}
+      <main
         style={{
           maxWidth: 640,
           margin: "0 auto",
-          padding: "24px 16px 80px",
+          padding: "22px 16px 72px",
           display: "flex",
           flexDirection: "column",
           gap: 16,
         }}
       >
         {/* Date */}
-        <div style={{ color: "#6B7280", fontSize: 13 }}>
+        <div
+          style={{
+            color: "rgba(237,228,206,0.65)",
+            fontSize: 13,
+            letterSpacing: "0.04em",
+            textTransform: "uppercase",
+          }}
+        >
           {dateDisplay}
         </div>
 
-        {/* GQ section */}
+        {/* GQ SECTION */}
         {gqResult ? (
-          <div
+          <section
             style={{
               background: "#111827",
-              border: "1px solid #1e2330",
-              borderRadius: 14,
-              padding: "32px 24px",
+              border: "1px solid #1f2933",
+              borderRadius: 18,
+              padding: "30px 22px 26px",
               textAlign: "center",
               position: "relative",
               overflow: "hidden",
             }}
           >
+            {/* Glow behind arc */}
             <div
               style={{
                 position: "absolute",
                 top: -40,
                 left: "50%",
                 transform: "translateX(-50%)",
-                width: 200,
-                height: 200,
+                width: 220,
+                height: 220,
                 borderRadius: "50%",
-                background: `radial-gradient(circle, ${tierC}20 0%, transparent 70%)`,
+                background: `radial-gradient(circle, ${tierC}26 0%, transparent 70%)`,
                 pointerEvents: "none",
               }}
             />
+
             <GQArc score={gqResult.gqScore} tier={gqResult.gqTier} />
+
             <div
               style={{
                 fontSize: 11,
@@ -590,7 +613,7 @@ export default function DashboardClient({
                 letterSpacing: "0.12em",
                 textTransform: "uppercase",
                 color: tierC,
-                marginTop: 4,
+                marginTop: 6,
                 marginBottom: 8,
               }}
             >
@@ -600,7 +623,7 @@ export default function DashboardClient({
               style={{
                 fontFamily: "Georgia, serif",
                 fontSize: 18,
-                color: "#E8DCC8",
+                color: "#EDE4CE",
                 marginBottom: 6,
               }}
             >
@@ -608,7 +631,7 @@ export default function DashboardClient({
             </div>
             <div
               style={{
-                color: "#6B7280",
+                color: "#9CA3AF",
                 fontSize: 13,
                 lineHeight: 1.6,
               }}
@@ -623,7 +646,7 @@ export default function DashboardClient({
                 gap: 8,
                 justifyContent: "center",
                 flexWrap: "wrap",
-                marginTop: 20,
+                marginTop: 18,
               }}
             >
               {[
@@ -651,17 +674,18 @@ export default function DashboardClient({
                 <div
                   key={m.label}
                   style={{
-                    background: "#0d1117",
-                    border: "1px solid #1e2330",
-                    borderRadius: 8,
+                    background: "#06070E",
+                    border: "1px solid #1f2933",
+                    borderRadius: 10,
                     padding: "8px 12px",
                     textAlign: "center",
+                    minWidth: 110,
                   }}
                 >
                   <div
                     style={{
                       fontSize: 10,
-                      color: "#6B7280",
+                      color: "#9CA3AF",
                       letterSpacing: "0.06em",
                       textTransform: "uppercase",
                     }}
@@ -672,15 +696,15 @@ export default function DashboardClient({
                     style={{
                       fontSize: 14,
                       fontWeight: 600,
-                      color: "#E8DCC8",
+                      color: "#EDE4CE",
                       marginTop: 2,
                     }}
                   >
                     {m.val ?? (
                       <span
                         style={{
-                          fontSize: 10,
-                          color: "#6B7280",
+                          fontSize: 11,
+                          color: "#9CA3AF",
                           fontWeight: 400,
                         }}
                       >
@@ -692,7 +716,7 @@ export default function DashboardClient({
                 </div>
               ))}
             </div>
-          </div>
+          </section>
         ) : (
           <GQTeaser
             daysUntilGQ={daysUntilGQ}
@@ -700,36 +724,43 @@ export default function DashboardClient({
           />
         )}
 
-        {/* Tier bar */}
+        {/* Tier bar only when GQ exists */}
         {gqResult && <TierBar gqScore={gqResult.gqScore} />}
 
         {/* Today check-in hint + form */}
-        {!hasTodayEntry && (
-          <div
-            style={{
-              fontSize: 12,
-              color: "#C9922A",
-              marginBottom: 4,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-            }}
-          >
-            Start here: lock in today&apos;s waking and post-meal readings.
-          </div>
-        )}
+        <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {!hasTodayEntry && (
+            <div
+              style={{
+                fontSize: 11,
+                color: "#E4A83C",
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+              }}
+            >
+              Start here: lock in today&apos;s waking and post-meal readings.
+            </div>
+          )}
 
-        <TodayCheckInForm
-          key={refreshKey}
-          userId={userId}
-          defaultUnit={unit}
-          existingEntry={todayEntry}
-          onSaved={() => setRefreshKey((k) => k + 1)}
-        />
+          <TodayCheckInForm
+            key={refreshKey}
+            userId={userId}
+            defaultUnit={unit}
+            existingEntry={todayEntry}
+            onSaved={() => setRefreshKey((k) => k + 1)}
+          />
+        </section>
 
-        <RecentEntries entries={entries} />
+        {/* Recent entries */}
+        <section>
+          <RecentEntries entries={entries} />
+        </section>
 
-        <ProLockedCharts />
-      </div>
+        {/* Pro-locked charts */}
+        <section>
+          <ProLockedCharts />
+        </section>
+      </main>
     </div>
   );
 }
