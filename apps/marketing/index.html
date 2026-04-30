@@ -495,6 +495,7 @@ body  { background: #06070E; }
           <button onclick="submitForm()" class="submit-btn"><span>Generate your ascent</span></button>
         </div>
       </div>
+      <p id="waitlist-message" class="fine" style="margin-top:6px; opacity:0.7;"></p>
 
       <div class="success" id="successMsg">
         <div class="success-title">Await your ascent.</div>
@@ -561,7 +562,7 @@ body  { background: #06070E; }
     // Painting rises up from below
     setTimeout(function() {
       painting.style.visibility = 'visible';
-      painting.style.opacity    = '0';
+      painting.style.opacigit revert HEADty    = '0';
       painting.style.transform  = 'translateY(100px)';
       painting.style.transition = 'none';
       painting.offsetHeight;
@@ -700,15 +701,45 @@ function submitForm() {
     return;
   }
 
-  // Submit to Netlify
-  fetch('/', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      'form-name': 'waitlist',
-      'email': email
-    }).toString()
-  }).catch(function() {});
+<script>
+  async function submitForm() {
+    var emailInput = document.getElementById('emailInput');
+    var email = emailInput.value;
+    var messageEl = document.getElementById('waitlist-message');
+
+    if (!email) {
+      if (messageEl) {
+        messageEl.textContent = 'Please enter an email.';
+      }
+      return;
+    }
+
+    if (messageEl) {
+      messageEl.textContent = 'Joining the waitlist...';
+      messageEl.style.opacity = '0.7';
+    }
+
+const { error } = await supabase.from('waitlist_signups').insert({ email });
+    if (error) {
+      if (messageEl) {
+        if (error.code === '23505') {
+          messageEl.textContent = 'You’re already on the waitlist.';
+        } else {
+          messageEl.textContent = 'Something went wrong. Please try again.';
+        }
+      }
+      console.error(error);
+      return;
+    }
+
+    if (messageEl) {
+      messageEl.textContent = 'You’re in. We’ll email you when we’re ready.';
+      messageEl.style.opacity = '0.9';
+    }
+
+    emailInput.value = '';
+  }
+</script>
 
   // Show success
   document.getElementById('mainForm').style.display = 'none';
@@ -720,6 +751,62 @@ function submitForm() {
   success.style.animation = 'revealUp 0.9s cubic-bezier(0.16,1,0.3,1) forwards';
 }
 </script>
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script>
+  // TODO: replace these two with your real values from Supabase
+  const SUPABASE_URL = "https://YOUR-PROJECT-REF.supabase.co";
+  const SUPABASE_ANON_KEY = "YOUR_ANON_KEY_HERE";
 
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  async function handleWaitlistSubmit(event) {
+    event.preventDefault();
+
+    const form = event.target;
+    const emailInput = form.querySelector('input[name="email"]');
+    const messageEl = document.getElementById("waitlist-message");
+
+    if (!emailInput || !emailInput.value) return;
+
+    const email = emailInput.value.trim();
+    if (!email) return;
+
+    messageEl.textContent = "Joining the waitlist...";
+    messageEl.style.color = "#555";
+
+    const { error } = await supabase.from("waitlist").insert({ email });
+
+    if (error) {
+      // 23505 is Postgres unique_violation
+      if (error.code === "23505") {
+        messageEl.textContent = "You’re already on the waitlist.";
+      } else {
+        messageEl.textContent = "Something went wrong. Please try again.";
+        console.error(error);
+      }
+      messageEl.style.color = "#c0392b";
+      return;
+    }
+
+    messageEl.textContent = "You’re in. We’ll email you when we’re ready.";
+    messageEl.style.color = "#2ecc71";
+    emailInput.value = "";
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    const form = document.getElementById("waitlist-form");
+    if (form) {
+      form.addEventListener("submit", handleWaitlistSubmit);
+    }
+  });
+</script>
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script>
+  // REPLACE these two lines with your real Supabase project values:
+  const SUPABASE_URL = "https://YOUR-PROJECT-REF.supabase.co";
+  const SUPABASE_ANON_KEY = "YOUR_ANON_KEY_HERE";
+
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+</script>
 </body>
 </html>
