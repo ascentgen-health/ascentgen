@@ -1,7 +1,9 @@
 // app/debug/page.tsx
-import { supabase } from '@/lib/supabaseClient';
+import { getSupabaseClient } from '@/lib/supabaseClient';
 
 export default async function DebugPage() {
+  const supabase = getSupabaseClient();
+
   const { data, error } = await supabase
     .from('daily_entries')
     .select('*')
