@@ -1,17 +1,17 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-let supabase: SupabaseClient | null = null
+let supabase: SupabaseClient | null = null;
 
 export function getSupabaseClient() {
-  if (supabase) return supabase
+  if (supabase) return supabase;
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error('Supabase not configured')
+    throw new Error('Supabase not configured');
   }
 
-  supabase = createClient(supabaseUrl, supabaseAnonKey)
-  return supabase
+  supabase = createClient(supabaseUrl, supabaseAnonKey);
+  return supabase;
 }
