@@ -753,60 +753,86 @@ const { error } = await supabase.from('waitlist_signups').insert({ email });
 </script>
 <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
 <script>
-  // TODO: replace these two with your real values from Supabase
+  // REPLACE with your real Supabase values:
   const SUPABASE_URL = "https://YOUR-PROJECT-REF.supabase.co";
   const SUPABASE_ANON_KEY = "YOUR_ANON_KEY_HERE";
 
   const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  async function handleWaitlistSubmit(event) {
-    event.preventDefault();
+  async function submitForm() {
+    var emailInput = document.getElementById('emailInput');
+    var email = emailInput ? emailInput.value : '';
+    var messageEl = document.getElementById('waitlist-message');
 
-    const form = event.target;
-    const emailInput = form.querySelector('input[name="email"]');
-    const messageEl = document.getElementById("waitlist-message");
-
-    if (!emailInput || !emailInput.value) return;
-
-    const email = emailInput.value.trim();
-    if (!email) return;
-
-    messageEl.textContent = "Joining the waitlist...";
-    messageEl.style.color = "#555";
-
-    const { error } = await supabase.from("waitlist").insert({ email });
-
-    if (error) {
-      // 23505 is Postgres unique_violation
-      if (error.code === "23505") {
-        messageEl.textContent = "You’re already on the waitlist.";
-      } else {
-        messageEl.textContent = "Something went wrong. Please try again.";
-        console.error(error);
+    if (!email) {
+      if (messageEl) {
+        messageEl.textContent = 'Please enter an email.';
       }
-      messageEl.style.color = "#c0392b";
       return;
     }
 
-    messageEl.textContent = "You’re in. We’ll email you when we’re ready.";
-    messageEl.style.color = "#2ecc71";
-    emailInput.value = "";
-  }
-
-  document.addEventListener("DOMContentLoaded", function () {
-    const form = document.getElementById("waitlist-form");
-    if (form) {
-      form.addEventListener("submit", handleWaitlistSubmit);
+    if (messageEl) {
+      messageEl.textContent = 'Joining the waitlist...';
+      messageEl.style.opacity = '0.7';
+      messageEl.style.color = '#EDE4CE';
     }
-  });
-</script>
-<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
-<script>
-  // REPLACE these two lines with your real Supabase project values:
-  const SUPABASE_URL = "https://YOUR-PROJECT-REF.supabase.co";
-  const SUPABASE_ANON_KEY = "YOUR_ANON_KEY_HERE";
 
-  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    try {
+      const { error } = await supabase.from('waitlist_signups').insert({ email });
+
+      if (error) {
+        if (messageEl) {
+          if (error.code === '23505') {
+            messageEl.textContent = 'You’re already on the waitlist.';
+          } else {
+            messageEl.textContent = 'Something went wrong. Please try again.';
+          }
+          messageEl.style.color = '#ff7f7f';
+        }
+        console.error(error);
+        return;
+      }
+
+      if (messageEl) {
+        messageEl.textContent = 'You’re in. We’ll email you when we’re ready.';
+        messageEl.style.opacity = '0.9';
+        messageEl.style.color = '#8fffa8';
+      }
+
+      if (emailInput) {
+        emailInput.value = '';
+      }
+    } catch (e) {
+      console.error(e);
+      if (messageEl) {
+        messageEl.textContent = 'Something went wrong. Please try again.';
+        messageEl.style.color = '#ff7f7f';
+      }
+    }
+  }
+</script>
+<script>
+  // Hard fallback: ensure main content becomes visible even if intro scripts misbehave.
+  setTimeout(function () {
+    var selectors = [
+      '.painting-side',
+      '.form-side',
+      '.headline',
+      '#rPeatAttrib',
+      '#mainForm',
+      '.bottom-mark',
+      '.logo-wrap'
+    ];
+    selectors.forEach(function (sel) {
+      var els = document.querySelectorAll(sel);
+      els.forEach(function (el) {
+        if (getComputedStyle(el).visibility === 'hidden') {
+          el.style.visibility = 'visible';
+          el.style.opacity = '1';
+        }
+      });
+    });
+  }, 2000);
 </script>
 </body>
 </html>
