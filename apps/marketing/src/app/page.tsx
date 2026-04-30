@@ -7,15 +7,15 @@ export default function HomePage() {
 
 <div className="split">
 
-  <!-- ── PAINTING ── -->
-  <div className="painting-side">
+  {/* ── PAINTING ── */}
+    <div className="painting-side">
     <img
       src="Blake_Ascension.webp"      alt=""
       role="presentation"
     >
   </div>
 
-  <!-- ── FORM ── -->
+  {/* ── FORM ── */}
   <div className="form-side">
     <div className="form-inner">
 
