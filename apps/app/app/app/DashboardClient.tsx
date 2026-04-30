@@ -1,766 +1,946 @@
-"use client";
+'use client'
 
-import { useState } from "react";
-import TodayCheckInForm from "./TodayCheckInForm";
-import RecentEntries from "./RecentEntries";
-import type { GQResult, GQTier } from "@/lib/gq";
-import { tierColor, tierTagline } from "@/lib/gq";
+import { useState, useEffect } from 'react'
+import Image from 'next/image'
+import { LogoutButton } from '@/app/_components/LogoutButton'
 
-interface DashboardClientProps {
-  userId: string;
-  unit: "F" | "C";
-  todayEntry: any;
-  entries: any[];
-  gqResult: GQResult | null;
-  streak: number;
-  totalEntries: number;
-  daysUntilGQ: number;
-  todayStr: string;
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface DailyEntry {
+  date: string
+  waking_temp_value: number | null
+  waking_temp_unit: string | null
+  waking_pulse_bpm: number | null
+  post_meal_temp_value: number | null
+  post_meal_temp_unit: string | null
+  post_meal_pulse_bpm: number | null
 }
 
-function GQArc({ score, tier }: { score: number; tier: GQTier }) {
-  const color = tierColor(tier);
-  const r = 80;
-  const cx = 110;
-  const cy = 110;
-  const startAngle = -210;
-  const totalArc = 240;
+interface GQResult {
+  gqScore: number | null
+  gqTier: 'Dormant' | 'Kindling' | 'Ascending' | null
+  patternLabel: string | null
+}
 
-  function polarToXY(angleDeg: number, radius: number) {
-    const rad = (angleDeg * Math.PI) / 180;
-    return {
-      x: cx + radius * Math.cos(rad),
-      y: cy + radius * Math.sin(rad),
-    };
-  }
+interface Props {
+  entries: DailyEntry[]
+  gq: GQResult | null
+  streak: number
+  userUnit: 'F' | 'C'
+}
 
-  function describeArc(startDeg: number, endDeg: number, rad: number) {
-    const s = polarToXY(startDeg, rad);
-    const e = polarToXY(endDeg, rad);
-    const largeArc = endDeg - startDeg > 180 ? 1 : 0;
-    return `M ${s.x} ${s.y} A ${rad} ${rad} 0 ${largeArc} 1 ${e.x} ${e.y}`;
-  }
+// ─── Tier helpers ─────────────────────────────────────────────────────────────
 
-  const endAngle = startAngle + (score / 100) * totalArc;
+const TIER_COLOR: Record<'Ascending' | 'Kindling' | 'Dormant', string> = {
+  Ascending: '#7AAE7A',
+  Kindling: '#C8841A',
+  Dormant: '#EF4444',
+}
 
+const TIER_PATTERN: Record<'Ascending' | 'Kindling' | 'Dormant', string> = {
+  Ascending: 'Warm & Steady',
+  Kindling: 'Hot but Wired',
+  Dormant: 'Cold & Slow',
+}
+
+const TIER_BLURB: Record<'Ascending' | 'Kindling' | 'Dormant', string> = {
+  Ascending:
+    'Warm, steady temps and a calm pulse — the Ascending band where generative energy supports repair and life.',
+  Kindling:
+    "You’re warming up and getting more stable. Consistent routines help the fire take and hold.",
+  Dormant:
+    'Colder and/or unstable readings — generative energy is low or scattered, and stress chemistry tends to dominate.',
+}
+
+const TIERS = [
+  { name: 'Ascending', range: 'GQ 90–100', color: '#7AAE7A', desc: 'Warm, steady, alive — the fire holds.' },
+  { name: 'Kindling', range: 'GQ 70–89', color: '#C8841A', desc: 'Heat is building — the fire is catching.' },
+  { name: 'Dormant', range: 'GQ 0–69', color: '#EF4444', desc: "Colder, slowed — the fire hasn’t caught yet." },
+] as const
+
+// ─── Small helpers ────────────────────────────────────────────────────────────
+
+function formatTemp(val: number | null, unit: string | null, display: 'F' | 'C'): string {
+  if (val === null) return '—'
+  if (unit === 'F' && display === 'C') return `${(((val - 32) * 5) / 9).toFixed(1)}°C`
+  if (unit === 'C' && display === 'F') return `${(((val * 9) / 5 + 32)).toFixed(1)}°F`
+  return `${val.toFixed(1)}°${display}`
+}
+
+function formatPulse(val: number | null): string {
+  return val !== null ? `${val} bpm` : '—'
+}
+
+function avg(vals: (number | null)[]): number | null {
+  const clean = vals.filter((v): v is number => v !== null)
+  if (!clean.length) return null
+  return clean.reduce((a, b) => a + b, 0) / clean.length
+}
+
+function toDisplayTemp(val: number | null, unit: string | null, display: 'F' | 'C'): string {
+  if (val === null) return '—'
+  if (unit === 'F' && display === 'C') return `${(((val - 32) * 5) / 9).toFixed(1)}°C`
+  if (unit === 'C' && display === 'F') return `${(((val * 9) / 5 + 32)).toFixed(1)}°F`
+  return `${val.toFixed(1)}°${display}`
+}
+
+// ─── Icons / micro components ────────────────────────────────────────────────
+
+function ArrowTip({ color, size = 52 }: { color: string; size?: number }) {
+  const h = Math.round(size * 0.72)
   return (
-    <svg
-      width={220}
-      height={200}
-      viewBox="0 0 220 200"
-      style={{ overflow: "visible" }}
-    >
-      {/* Track */}
-      <path
-        d={describeArc(startAngle, startAngle + totalArc, r)}
-        fill="none"
-        stroke="#1e2330"
-        strokeWidth={14}
-        strokeLinecap="round"
-      />
-      {/* Filled arc */}
-      <path
-        d={describeArc(startAngle, endAngle, r)}
-        fill="none"
+    <svg width={size} height={h} viewBox={`0 0 ${size} ${h}`} fill="none">
+      <polygon
+        points={`${size / 2},2 ${size - 2},${h - 2} 2,${h - 2}`}
         stroke={color}
-        strokeWidth={14}
-        strokeLinecap="round"
-        style={{ filter: `drop-shadow(0 0 8px ${color}60)` }}
+        strokeWidth="2"
+        fill="none"
+        strokeLinejoin="miter"
       />
-
-      {/* Score */}
-      <text
-        x={cx}
-        y={cy - 6}
-        textAnchor="middle"
-        fill={color}
-        fontSize={48}
-        fontWeight={700}
-        fontFamily="Inter, system-ui, sans-serif"
-      >
-        {score}
-      </text>
-      <text
-        x={cx}
-        y={cy + 20}
-        textAnchor="middle"
-        fill="#9CA3AF"
-        fontSize={11}
-        fontWeight={600}
-        letterSpacing="0.12em"
-        fontFamily="Inter, system-ui, sans-serif"
-      >
-        GQ SCORE
-      </text>
     </svg>
-  );
+  )
 }
 
-function GQTeaser({
-  daysUntilGQ,
-  totalEntries,
-}: {
-  daysUntilGQ: number;
-  totalEntries: number;
-}) {
-  const dots = Array.from({ length: 7 }, (_, i) => i < totalEntries);
+// New tier icons for the bands
+function TierIconDormant() {
+  return (
+    <svg width={18} height={10} viewBox="0 0 18 10" fill="none">
+      <line
+        x1="1.5"
+        y1="5"
+        x2="16.5"
+        y2="5"
+        stroke="#EF4444"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
 
+function TierIconKindling() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 14 14" fill="none">
+      <circle cx="7" cy="7" r="4" fill="#C8841A" />
+    </svg>
+  )
+}
+
+function TierIconAscending() {
+  return (
+    <svg width={16} height={14} viewBox="0 0 16 14" fill="none">
+      <polygon points="8,1 15,13 1,13" fill="#7AAE7A" />
+    </svg>
+  )
+}
+
+function MetricBar({ fill }: { fill: number }) {
   return (
     <div
       style={{
-        background: "#111827",
-        border: "1px solid #1f2933",
-        borderRadius: 16,
-        padding: "28px 24px 26px",
-        textAlign: "center",
-        position: "relative",
-        overflow: "hidden",
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 3,
+        background: 'rgba(237,228,206,0.12)',
       }}
     >
-      {/* Ghost score */}
       <div
         style={{
-          fontSize: 82,
-          fontWeight: 700,
-          color: "#C9922A",
-          opacity: 0.08,
-          filter: "blur(8px)",
-          lineHeight: 1,
-          userSelect: "none",
-          marginBottom: -18,
+          height: '100%',
+          background: '#7AAE7A',
+          width: `${fill}%`,
+          transition: 'width 1.4s cubic-bezier(0.16,1,0.3,1)',
         }}
-      >
-        ??
-      </div>
-
-      <div
-        style={{
-          fontSize: 11,
-          fontWeight: 700,
-          letterSpacing: "0.12em",
-          textTransform: "uppercase",
-          color: "#C9922A",
-          marginBottom: 6,
-        }}
-      >
-        Your GQ Emerges In
-      </div>
-
-      <div
-        style={{
-          fontFamily: "Georgia, serif",
-          fontSize: 30,
-          color: "#EDE4CE",
-          marginBottom: 14,
-        }}
-      >
-        {daysUntilGQ} day{daysUntilGQ !== 1 ? "s" : ""}
-      </div>
-
-      <div
-        style={{
-          fontSize: 10,
-          color: "#9CA3AF",
-          textTransform: "uppercase",
-          letterSpacing: "0.08em",
-          marginBottom: 10,
-        }}
-      >
-        Seven-day spark tracker
-      </div>
-
-      <div
-        style={{
-          display: "flex",
-          gap: 10,
-          justifyContent: "center",
-          marginBottom: 18,
-        }}
-      >
-        {dots.map((filled, i) => (
-          <div
-            key={i}
-            style={{
-              width: 12,
-              height: 12,
-              borderRadius: 999,
-              background: filled ? "#C9922A" : "#0f172a",
-              border: filled ? "none" : "1px solid #1f2933",
-              boxShadow: filled
-                ? "0 0 6px rgba(201,146,42,0.55)"
-                : "none",
-              transition: "all 0.3s",
-            }}
-          />
-        ))}
-      </div>
-
-      <p
-        style={{
-          color: "#9CA3AF",
-          fontSize: 13,
-          lineHeight: 1.7,
-          maxWidth: 320,
-          margin: "0 auto",
-        }}
-      >
-        Seven days of steady readings and your Generative Quotient appears.
-        One reading is a spark; seven build a small fire.
-      </p>
+      />
     </div>
-  );
+  )
 }
 
-function TierBar({ gqScore }: { gqScore: number }) {
-  const tiers = [
-    { label: "Dormant", color: "#6B7280" },
-    { label: "Kindling", color: "#C9922A" },
-    { label: "Ascending", color: "#7AAE7A" },
-  ] as const;
+// ─── GQ explainer ────────────────────────────────────────────────────────────
 
-  const currentTierIdx =
-    gqScore >= 90 ? 2 : gqScore >= 70 ? 1 : 0;
+function GQExplainer({ gqScore, gqTier }: { gqScore: number | null; gqTier: string | null }) {
+  const [open, setOpen] = useState(false)
 
   return (
-    <div
-      style={{
-        background: "#111827",
-        border: "1px solid #1f2933",
-        borderRadius: 16,
-        padding: "18px 22px 18px",
-      }}
-    >
-      <div
+    <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', marginBottom: 6, marginTop: 24 }}>
+      {/* Header row */}
+      <button
+        onClick={() => setOpen((o) => !o)}
         style={{
-          fontSize: 10,
-          fontWeight: 700,
-          letterSpacing: "0.1em",
-          textTransform: "uppercase",
-          color: "#9CA3AF",
-          marginBottom: 10,
+          width: '100%',
+          background: 'none',
+          border: 'none',
+          padding: '18px 28px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          cursor: 'pointer',
+          fontFamily: 'inherit',
         }}
       >
-        Tier path
-      </div>
-
-      <div style={{ display: "flex", gap: 4 }}>
-        {tiers.map((t, i) => (
-          <div
-            key={t.label}
-            style={{
-              flex: i === 1 ? 1.6 : 1,
-              minWidth: 0,
-            }}
-          >
-            <div
-              style={{
-                height: 6,
-                borderRadius: 999,
-                background: i <= currentTierIdx ? t.color : "#0f172a",
-                transition: "background 0.4s, opacity 0.4s",
-                opacity: i === currentTierIdx ? 1 : 0.5,
-              }}
-            />
-            <div
-              style={{
-                marginTop: 6,
-                fontSize: 10,
-                fontWeight: i === currentTierIdx ? 700 : 500,
-                color: i === currentTierIdx ? t.color : "#6B7280",
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-              }}
-            >
-              {t.label}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ProLockedCharts() {
-  return (
-    <div
-      style={{
-        background: "#111827",
-        border: "1px solid #1f2933",
-        borderRadius: 16,
-        padding: "26px 22px",
-        position: "relative",
-        overflow: "hidden",
-      }}
-    >
-      <h2
-        style={{
-          fontFamily: "Georgia, serif",
-          fontSize: 16,
-          fontWeight: 400,
-          color: "#EDE4CE",
-          marginBottom: 18,
-        }}
-      >
-        Trends
-      </h2>
-
-      {/* Ghost bars */}
-      <div
-        style={{
-          display: "flex",
-          gap: 4,
-          alignItems: "flex-end",
-          height: 80,
-          marginBottom: 16,
-          opacity: 0.16,
-          filter: "blur(2px)",
-        }}
-      >
-        {[60, 75, 55, 80, 70, 85, 65, 90, 72, 68, 82, 78, 88, 76].map(
-          (h, i) => (
-            <div
-              key={i}
-              style={{
-                flex: 1,
-                height: h,
-                background: "#C9922A",
-                borderRadius: "2px 2px 0 0",
-              }}
-            />
-          )
-        )}
-      </div>
-
-      {/* Lock overlay */}
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          background:
-            "linear-gradient(to bottom, transparent 30%, #111827 70%)",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "flex-end",
-          padding: 24,
-        }}
-      >
-        <div
-          style={{
-            textAlign: "center",
-            background: "#050816",
-            border: "1px solid #1f2933",
-            borderRadius: 12,
-            padding: "16px 22px",
-            width: "100%",
-            maxWidth: 260,
-          }}
-        >
-          <div style={{ fontSize: 20, marginBottom: 6 }}>🔒</div>
-          <div
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: "#EDE4CE",
-              marginBottom: 6,
-            }}
-          >
-            Trend charts Pro
-          </div>
-          <div
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <span
             style={{
               fontSize: 12,
-              color: "#9CA3AF",
-              marginBottom: 10,
-              lineHeight: 1.6,
-            }}
-          >
-            Unlock 14–90 day trend lines and full GQ history as you keep
-            logging.
-          </div>
-          <button
-            style={{
-              width: "100%",
-              padding: "9px 0",
-              background: "#C9922A",
-              border: "none",
-              borderRadius: 8,
-              color: "#020617",
-              fontSize: 12,
+              letterSpacing: '2.6px',
+              color: 'var(--text)',
+              textTransform: 'uppercase',
               fontWeight: 700,
-              letterSpacing: "0.05em",
-              cursor: "pointer",
             }}
           >
-            Upgrade to Pro
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export default function DashboardClient({
-  userId,
-  unit,
-  todayEntry,
-  entries,
-  gqResult,
-  streak,
-  totalEntries,
-  daysUntilGQ,
-}: DashboardClientProps) {
-  const [refreshKey, setRefreshKey] = useState(0);
-  const tier = gqResult?.gqTier ?? null;
-  const tierC = tier ? tierColor(tier) : "#6B7280";
-
-  const today = new Date();
-  const dateDisplay = today.toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-  });
-
-  const hasTodayEntry = !!todayEntry;
-
-  return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "#06070E",
-        fontFamily: "Jost, system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
-        color: "#EDE4CE",
-      }}
-    >
-      {/* HEADER */}
-      <header
-        style={{
-          borderBottom: "1px solid #1f2933",
-          padding: "14px 22px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          position: "sticky",
-          top: 0,
-          background: "rgba(6,7,14,0.96)",
-          backdropFilter: "blur(10px)",
-          zIndex: 10,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: "999px",
-              border: "1.5px solid #C9922A",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "rgba(201,146,42,0.06)",
-              boxShadow:
-                "0 0 12px rgba(200,132,26,0.45), 0 0 32px rgba(201,146,42,0.28)",
-            }}
-          >
-            <svg
-              width={14}
-              height={14}
-              viewBox="0 0 14 14"
-              fill="none"
-            >
-              <path
-                d="M7 1 L7 7 M7 7 L4 4 M7 7 L10 4"
-                stroke="#E4A83C"
-                strokeWidth={1.5}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <circle
-                cx={7}
-                cy={7}
-                r={5.5}
-                stroke="#E4A83C"
-                strokeWidth={1}
-                opacity={0.5}
-              />
-            </svg>
-          </div>
-          <div>
+            About your GQ
+          </span>
+          {gqTier && (
             <span
               style={{
-                fontFamily: "Cinzel, Georgia, serif",
-                fontSize: 16,
-                letterSpacing: "0.18em",
-                textTransform: "uppercase",
-              }}
-            >
-              Ascentgen
-            </span>
-            <div
-              style={{
                 fontSize: 11,
-                color: "rgba(237,228,206,0.65)",
-                letterSpacing: "0.06em",
-                marginTop: 2,
-                textTransform: "uppercase",
+                letterSpacing: '1.8px',
+                color: TIER_COLOR[gqTier as 'Ascending' | 'Kindling' | 'Dormant'],
+                textTransform: 'uppercase',
+                fontWeight: 600,
               }}
             >
-              Track heat. Track rhythm. Ascend.
-            </div>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {/* Streak pill */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              background: "rgba(201,146,42,0.10)",
-              border: "1px solid rgba(201,146,42,0.35)",
-              borderRadius: 999,
-              padding: "4px 11px",
-              fontSize: 12,
-              color: "#E4A83C",
-              fontWeight: 600,
-            }}
-          >
-            <span>🔥</span>
-            <span>
-              {streak} day{streak !== 1 ? "s" : ""}
+              {gqTier}
+              {gqScore !== null ? ` · ${gqScore}` : ''}
             </span>
-          </div>
-
-          {/* Tier pill */}
-          {tier && (
-            <div
-              style={{
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: "0.1em",
-                textTransform: "uppercase",
-                color: tierC,
-                background: `${tierC}1A`,
-                border: `1px solid ${tierC}55`,
-                borderRadius: 999,
-                padding: "4px 12px",
-              }}
-            >
-              {tier}
-            </div>
           )}
         </div>
-      </header>
+        <svg
+          width={16}
+          height={16}
+          viewBox="0 0 14 14"
+          fill="none"
+          style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .2s', flexShrink: 0 }}
+        >
+          <polyline points="2,4 7,10 12,4" stroke="var(--text3)" strokeWidth="1.4" fill="none" />
+        </svg>
+      </button>
 
-      {/* MAIN CONTENT */}
-      <main
-        style={{
-          maxWidth: 640,
-          margin: "0 auto",
-          padding: "22px 16px 72px",
-          display: "flex",
-          flexDirection: "column",
-          gap: 16,
-        }}
-      >
-        {/* Date */}
+      {/* Body */}
+      {open && (
         <div
           style={{
-            color: "rgba(237,228,206,0.65)",
-            fontSize: 13,
-            letterSpacing: "0.04em",
-            textTransform: "uppercase",
+            padding: '0 28px 26px',
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0,1.2fr) 1px minmax(0,1fr)',
+            gap: 0,
           }}
         >
-          {dateDisplay}
-        </div>
-
-        {/* GQ SECTION */}
-        {gqResult ? (
-          <section
-            style={{
-              background: "#111827",
-              border: "1px solid #1f2933",
-              borderRadius: 18,
-              padding: "30px 22px 26px",
-              textAlign: "center",
-              position: "relative",
-              overflow: "hidden",
-            }}
-          >
-            {/* Glow behind arc */}
-            <div
-              style={{
-                position: "absolute",
-                top: -40,
-                left: "50%",
-                transform: "translateX(-50%)",
-                width: 220,
-                height: 220,
-                borderRadius: "50%",
-                background: `radial-gradient(circle, ${tierC}26 0%, transparent 70%)`,
-                pointerEvents: "none",
-              }}
-            />
-
-            <GQArc score={gqResult.gqScore} tier={gqResult.gqTier} />
-
+          {/* Left: explainer text */}
+          <div style={{ paddingRight: 24 }}>
             <div
               style={{
                 fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: "0.12em",
-                textTransform: "uppercase",
-                color: tierC,
-                marginTop: 6,
-                marginBottom: 8,
+                letterSpacing: '2.2px',
+                color: 'var(--text2)',
+                textTransform: 'uppercase',
+                marginBottom: 14,
+                fontWeight: 600,
               }}
             >
-              {gqResult.gqTier}
+              How it works
             </div>
-            <div
-              style={{
-                fontFamily: "Georgia, serif",
-                fontSize: 18,
-                color: "#EDE4CE",
-                marginBottom: 6,
-              }}
-            >
-              {gqResult.patternLabel}
-            </div>
-            <div
-              style={{
-                color: "#9CA3AF",
-                fontSize: 13,
-                lineHeight: 1.6,
-              }}
-            >
-              {tierTagline(gqResult.gqTier)}
-            </div>
+            <p style={{ fontSize: 14, color: 'var(--text2)', lineHeight: 1.8, marginBottom: 12 }}>
+              Ascentgen watches waking and post-meal temperature and pulse to see how warm and how steady your system
+              runs from day to day.
+            </p>
+            <p style={{ fontSize: 14, color: 'var(--text2)', lineHeight: 1.8, marginBottom: 12 }}>
+              Those four readings become a <span style={{ color: 'var(--text)' }}>Generative Quotient (GQ)</span> — a
+              0–100 index of how close and how stable you are to the generative targets over the last 14 days.
+            </p>
+            <p style={{ fontSize: 14, color: 'var(--text2)', lineHeight: 1.8 }}>
+              It&apos;s a compass, not a diagnosis. Direction and stability matter more than hitting any single number.
+            </p>
+          </div>
 
-            {/* Metric pills */}
+          {/* Divider */}
+          <div style={{ background: 'var(--line)', margin: '0 24px' }} />
+
+          {/* Right: tier bands */}
+          <div>
             <div
               style={{
-                display: "flex",
-                gap: 8,
-                justifyContent: "center",
-                flexWrap: "wrap",
-                marginTop: 18,
+                fontSize: 11,
+                letterSpacing: '2.2px',
+                color: 'var(--text2)',
+                textTransform: 'uppercase',
+                marginBottom: 14,
+                fontWeight: 600,
               }}
             >
-              {[
-                {
-                  label: "Wk Temp",
-                  val: gqResult.avgWakingTemp?.toFixed(1),
-                  suffix: "°C avg",
-                },
-                {
-                  label: "PM Temp",
-                  val: gqResult.avgPostMealTemp?.toFixed(1),
-                  suffix: "°C avg",
-                },
-                {
-                  label: "Wk Pulse",
-                  val: gqResult.avgWakingPulse?.toFixed(0),
-                  suffix: "bpm avg",
-                },
-                {
-                  label: "PM Pulse",
-                  val: gqResult.avgPostMealPulse?.toFixed(0),
-                  suffix: "bpm avg",
-                },
-              ].map((m) => (
-                <div
-                  key={m.label}
-                  style={{
-                    background: "#06070E",
-                    border: "1px solid #1f2933",
-                    borderRadius: 10,
-                    padding: "8px 12px",
-                    textAlign: "center",
-                    minWidth: 110,
-                  }}
-                >
+              The three bands
+            </div>
+            {TIERS.map((t, i) => (
+              <div
+                key={t.name}
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 12,
+                  paddingBottom: i < TIERS.length - 1 ? 14 : 0,
+                  marginBottom: i < TIERS.length - 1 ? 14 : 0,
+                  borderBottom: i < TIERS.length - 1 ? '1px solid rgba(237,228,206,0.06)' : 'none',
+                }}
+              >
+                <div style={{ paddingTop: 3, flexShrink: 0 }}>
+                  {t.name === 'Dormant' && <TierIconDormant />}
+                  {t.name === 'Kindling' && <TierIconKindling />}
+                  {t.name === 'Ascending' && <TierIconAscending />}
+                </div>
+                <div style={{ flex: 1 }}>
                   <div
                     style={{
-                      fontSize: 10,
-                      color: "#9CA3AF",
-                      letterSpacing: "0.06em",
-                      textTransform: "uppercase",
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      marginBottom: 4,
                     }}
                   >
-                    {m.label}
+                    <span
+                      style={{
+                        fontSize: 12,
+                        letterSpacing: '2.2px',
+                        textTransform: 'uppercase',
+                        fontWeight: 700,
+                        color: t.color,
+                      }}
+                    >
+                      {t.name}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: 'rgba(237,228,206,0.4)',
+                        letterSpacing: '1px',
+                      }}
+                    >
+                      {t.range}
+                    </span>
                   </div>
                   <div
                     style={{
-                      fontSize: 14,
-                      fontWeight: 600,
-                      color: "#EDE4CE",
-                      marginTop: 2,
+                      fontSize: 13,
+                      color: 'rgba(237,228,206,0.75)',
+                      lineHeight: 1.6,
                     }}
                   >
-                    {m.val ?? (
-                      <span
-                        style={{
-                          fontSize: 11,
-                          color: "#9CA3AF",
-                          fontWeight: 400,
-                        }}
-                      >
-                        {m.suffix}
-                      </span>
-                    )}{" "}
-                    {m.val && m.suffix}
+                    {t.desc}
+                  </div>
+                </div>
+                {gqTier === t.name && (
+                  <div
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      background: t.color,
+                      flexShrink: 0,
+                      marginTop: 4,
+                    }}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Main dashboard component ────────────────────────────────────────────────
+
+export default function DashboardClient(rawProps: Props) {
+  const entries = Array.isArray(rawProps.entries) ? rawProps.entries : []
+  const gq = rawProps.gq
+  const streak = rawProps.streak
+  const userUnit = rawProps.userUnit
+
+  const [barWidths, setBarWidths] = useState([0, 0, 0, 0])
+
+  const safeTier = gq?.gqTier ?? 'Dormant'
+  const tier: 'Ascending' | 'Kindling' | 'Dormant' = safeTier
+  const score = gq?.gqScore ?? null
+  const tierColor = TIER_COLOR[tier]
+
+  const last14 = entries.slice(0, 14)
+  const wtAvg = avg(last14.map((e) => e.waking_temp_value))
+  const mtAvg = avg(last14.map((e) => e.post_meal_temp_value))
+  const wpAvg = avg(last14.map((e) => e.waking_pulse_bpm))
+  const mpAvg = avg(last14.map((e) => e.post_meal_pulse_bpm))
+
+  function tempBar(val: number | null, unit: string | null, ideal: number) {
+    if (val === null) return 0
+    const inF = unit === 'C' ? (val * 9) / 5 + 32 : val
+    return Math.max(0, Math.min(100, 100 - Math.abs(inF - ideal) * 20))
+  }
+  function pulseBar(val: number | null, ideal: number) {
+    if (val === null) return 0
+    return Math.max(0, Math.min(100, 100 - Math.abs(val - ideal) * 3))
+  }
+
+  const targetBars = [
+    tempBar(wtAvg, last14[0]?.waking_temp_unit ?? 'F', 97.8),
+    tempBar(mtAvg, last14[0]?.post_meal_temp_unit ?? 'F', 98.6),
+    pulseBar(wpAvg, 75),
+    pulseBar(mpAvg, 82),
+  ]
+
+  useEffect(() => {
+    const t = setTimeout(() => setBarWidths(targetBars), 400)
+    return () => clearTimeout(t)
+  }, [entries])
+
+  const today = entries[0]
+  const todayDate = new Date().toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  })
+
+  const metrics = [
+    { label: 'Waking Temp', value: toDisplayTemp(wtAvg, last14[0]?.waking_temp_unit ?? 'F', userUnit) },
+    { label: 'Post-Meal Temp', value: toDisplayTemp(mtAvg, last14[0]?.post_meal_temp_unit ?? 'F', userUnit) },
+    { label: 'Waking Pulse', value: wpAvg !== null ? `${wpAvg.toFixed(0)} bpm` : '—' },
+    { label: 'Post-Meal Pulse', value: mpAvg !== null ? `${mpAvg.toFixed(0)} bpm` : '—' },
+  ]
+
+  return (
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Jost:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap');
+        :root {
+          --bg: #080910;
+          --bg2: #0D0E18;
+          --panel: #06070E;
+          --amber: #C8841A;
+          --amber2: #E4A83C;
+          --amber3: #F2C46A;
+          --text: #EDE4CE;
+          --text2: rgba(237,228,206,0.8);
+          --text3: rgba(237,228,206,0.6);
+          --line: rgba(237,228,206,0.14);
+          --green: #7AAE7A;
+        }
+        .ag-dash *{box-sizing:border-box;margin:0;padding:0}
+        .ag-dash{
+          background:var(--bg);
+          color:var(--text);
+          font-family:'Jost',sans-serif;
+          font-weight:300;
+          min-height:100vh;
+        }
+        .ag-header{
+          background:var(--bg2);
+          border-bottom:1px solid var(--line);
+          height:64px;
+          display:flex;
+          align-items:center;
+          padding:0 32px;
+        }
+        .ag-logo{display:flex;align-items:center;gap:14px;margin-right:22px;text-decoration:none}
+        .ag-wm{
+          font-family:'Cinzel',serif;
+          font-size:17px;
+          letter-spacing:6px;
+          text-transform:uppercase;
+          font-weight:600;
+        }
+        .ag-wm span:first-child{
+          color:var(--text);
+        }
+        .ag-wm span:last-child{
+          color:var(--amber2);
+        }
+        .ag-tagline{
+          font-size:11px;
+          letter-spacing:2.4px;
+          color:var(--text3);
+          text-transform:uppercase;
+          border-left:1px solid var(--line);
+          padding-left:18px;
+        }
+        .ag-header-right{margin-left:auto;display:flex;align-items:center;gap:16px}
+        .ag-date{
+          font-size:11px;
+          letter-spacing:1.8px;
+          color:var(--text3);
+          text-transform:uppercase;
+          font-weight:500;
+        }
+        .ag-streak{
+          border:1px solid var(--amber2);
+          padding:6px 16px 5px;
+          font-size:11px;
+          letter-spacing:2.2px;
+          color:var(--amber3);
+          font-weight:600;
+          text-transform:uppercase;
+          display:flex;
+          align-items:center;
+          gap:7px;
+        }
+        .logo-glow{
+          animation:logoGlow 3s ease-in-out infinite;
+        }
+        @keyframes logoGlow{
+          0%,100%{
+            filter:drop-shadow(0 0 6px rgba(200,132,26,.9)) drop-shadow(0 0 18px rgba(200,132,26,.5))
+          }
+          50%{
+            filter:drop-shadow(0 0 12px rgba(242,196,106,1)) drop-shadow(0 0 30px rgba(200,132,26,.7))
+          }
+        }
+        .ag-body{
+          max-width:1200px;
+          margin:0 auto;
+          padding:40px 32px 80px;
+        }
+        .ag-hero{
+          display:grid;
+          grid-template-columns:1fr 1px 1fr;
+          background:var(--panel);
+          border:1px solid var(--line);
+          margin-bottom:4px;
+          animation:fadeUp .5s ease both;
+        }
+        .ag-hero-left,.ag-hero-right{
+          padding:40px 44px;
+          display:flex;
+          flex-direction:column;
+          justify-content:center;
+        }
+        .ag-divider{background:var(--line);width:1px}
+        .ag-sec{
+          font-size:13px;
+          letter-spacing:3px;
+          color:var(--text);
+          text-transform:uppercase;
+          margin-bottom:22px;
+          font-weight:700;
+        }
+        .ag-score-row{display:flex;align-items:flex-end;gap:20px;margin-bottom:18px}
+        .ag-score-num{
+          font-family:'Cinzel',serif;
+          font-size:80px;
+          line-height:1;
+          color:var(--text);
+          letter-spacing:-1px;
+        }
+        .ag-tier-name{
+          font-size:14px;
+          letter-spacing:4px;
+          text-transform:uppercase;
+          font-weight:700;
+          margin-bottom:8px;
+        }
+        .ag-tier-pat{
+          font-size:12px;
+          color:var(--text2);
+          letter-spacing:2px;
+          text-transform:uppercase;
+          font-weight:500;
+        }
+        .ag-bands{display:flex;flex-direction:column;margin-bottom:22px}
+        .ag-band{
+          display:flex;
+          align-items:center;
+          gap:14px;
+          padding:12px 0;
+          border-bottom:1px solid rgba(237,228,206,.07);
+        }
+        .ag-band:first-child{border-top:1px solid rgba(237,228,206,.07)}
+        .ag-band-info{flex:1}
+        .ag-band-name{
+          font-size:12px;
+          letter-spacing:2.4px;
+          text-transform:uppercase;
+          font-weight:700;
+          margin-bottom:3px;
+        }
+        .ag-band-range{
+          font-size:11px;
+          color:var(--text3);
+          letter-spacing:1px;
+        }
+        .ag-active-dot{
+          width:6px;
+          height:6px;
+          border-radius:50%;
+          flex-shrink:0;
+        }
+        .ag-blurb{
+          font-size:14px;
+          color:var(--text2);
+          line-height:1.9;
+          font-style:italic;
+          font-weight:400;
+          max-width:340px;
+        }
+        .ag-metrics{
+          display:grid;
+          grid-template-columns:repeat(4,1fr);
+          background:var(--panel);
+          border:1px solid var(--line);
+          border-top:none;
+          margin-bottom:10px;
+          animation:fadeUp .5s .1s ease both;
+        }
+        .ag-metric{
+          padding:22px 24px 20px;
+          border-right:1px solid var(--line);
+          position:relative;
+          overflow:hidden;
+        }
+        .ag-metric:last-child{border-right:none}
+        .ag-metric-label{
+          font-size:11px;
+          letter-spacing:2px;
+          color:var(--text3);
+          text-transform:uppercase;
+          margin-bottom:8px;
+          font-weight:500;
+        }
+        .ag-metric-value{
+          font-family:'Cinzel',serif;
+          font-size:20px;
+          color:var(--text);
+          letter-spacing:.3px;
+          margin-bottom:4px;
+        }
+        .ag-metric-sub{
+          font-size:11px;
+          letter-spacing:1.5px;
+          color:var(--text3);
+          text-transform:uppercase;
+        }
+        .ag-2col{
+          display:grid;
+          grid-template-columns:1fr 1fr;
+          gap:4px;
+          animation:fadeUp .5s .18s ease both;
+        }
+        .ag-card{
+          background:var(--panel);
+          border:1px solid var(--line);
+          padding:28px 30px;
+        }
+        .ag-card-label{
+          font-size:13px;
+          letter-spacing:2.8px;
+          color:var(--text);
+          text-transform:uppercase;
+          margin-bottom:20px;
+          display:flex;
+          align-items:center;
+          gap:10px;
+          font-weight:700;
+        }
+        .ag-card-label::after{
+          content:'';
+          flex:1;
+          height:1px;
+          background:rgba(237,228,206,.1);
+        }
+        .ag-field{margin-bottom:4px}
+        .ag-field-inner{
+          background:var(--bg);
+          border:1px solid var(--line);
+          padding:12px 16px;
+          display:flex;
+          justify-content:space-between;
+          align-items:center;
+          cursor:pointer;
+          transition:border-color .15s;
+        }
+        .ag-field-inner:hover{border-color:rgba(237,228,206,.22)}
+        .ag-field-name{
+          font-size:12px;
+          letter-spacing:1.4px;
+          color:var(--text2);
+          text-transform:uppercase;
+          font-weight:500;
+        }
+        .ag-field-value{
+          font-family:'Cinzel',serif;
+          font-size:14px;
+          color:var(--text);
+        }
+        .ag-field-empty .ag-field-value{color:rgba(237,228,206,.2)}
+        .ag-cta{
+          margin-top:18px;
+          background:var(--amber);
+          border:none;
+          padding:13px 0;
+          width:100%;
+          font-family:'Jost',sans-serif;
+          font-size:12px;
+          letter-spacing:2.2px;
+          color:var(--bg);
+          text-transform:uppercase;
+          font-weight:600;
+          cursor:pointer;
+          display:block;
+          text-align:center;
+          text-decoration:none;
+          transition:background .15s;
+        }
+        .ag-cta:hover{background:var(--amber2)}
+        .ag-table-head{
+          display:grid;
+          grid-template-columns:80px 1fr 1fr 1fr 1fr;
+          padding-bottom:8px;
+          border-bottom:1px solid rgba(237,228,206,.07);
+          margin-bottom:2px;
+        }
+        .ag-th{
+          font-size:11px;
+          letter-spacing:1.6px;
+          color:rgba(237,228,206,.5);
+          text-transform:uppercase;
+          font-weight:500;
+        }
+        .ag-th:not(:first-child){text-align:right}
+        .ag-table-row{
+          display:grid;
+          grid-template-columns:80px 1fr 1fr 1fr 1fr;
+          padding:10px 0;
+          border-bottom:1px solid rgba(237,228,206,.05);
+          cursor:pointer;
+          transition:background .1s;
+        }
+        .ag-table-row:last-child{border-bottom:none}
+        .ag-table-row:hover{background:rgba(237,228,206,.03)}
+        .ag-td{
+          font-size:13px;
+          color:var(--text);
+        }
+        .ag-td:not(:first-child){text-align:right}
+        .ag-td-date{
+          font-size:12px;
+          color:var(--text2);
+          font-weight:500;
+        }
+        .ag-table-foot{
+          margin-top:12px;
+          font-size:11px;
+          letter-spacing:1.5px;
+          color:rgba(237,228,206,.35);
+          text-transform:uppercase;
+          text-align:center;
+        }
+        .ag-empty{
+          padding:28px;
+          text-align:center;
+          color:var(--text3);
+          font-size:14px;
+          font-style:italic;
+          line-height:1.7;
+        }
+        .ag-footer{
+          margin-top:40px;
+          border-top:1px solid rgba(237,228,206,.07);
+          padding-top:14px;
+          display:flex;
+          justify-content:space-between;
+          animation:fadeUp .5s .26s ease both;
+        }
+        .ag-footer-text{
+          font-size:11px;
+          letter-spacing:1.6px;
+          color:rgba(237,228,206,.3);
+          text-transform:uppercase;
+        }
+        @keyframes fadeUp{
+          from{opacity:0;transform:translateY(10px)}
+          to{opacity:1;transform:translateY(0)}
+        }
+        @media(max-width:900px){
+          .ag-hero{grid-template-columns:1fr}
+          .ag-divider{display:none}
+          .ag-metrics{grid-template-columns:repeat(2,1fr)}
+          .ag-2col{grid-template-columns:1fr}
+          .ag-body{padding:24px 18px 60px}
+          .ag-header{padding:0 18px}
+          .ag-tagline{display:none}
+          .ag-score-num{font-size:64px}
+        }
+      `}</style>
+
+      <div className="ag-dash">
+        {/* Header */}
+        <header className="ag-header">
+          <a href="/app" className="ag-logo">
+            <Image
+              src="/logo.png"
+              alt="Ascentgen"
+              width={36}
+              height={44}
+              style={{ objectFit: 'contain', display: 'block' }}
+              className="logo-glow"
+              priority
+            />
+            <span className="ag-wm">
+              <span>Ascent</span>
+              <span>Gen</span>
+            </span>
+          </a>
+        <span className="ag-tagline">Heat · Rhythm · Ascent</span>
+          <div className="ag-header-right">
+            <span className="ag-date">{todayDate}</span>
+            <span className="ag-streak">
+              <svg width={8} height={8} viewBox="0 0 8 8" fill="none">
+                <polygon points="4,1 7,7 1,7" stroke="#C8841A" strokeWidth="1" fill="none" strokeLinejoin="miter" />
+              </svg>
+              Day {streak}
+            </span>
+            <LogoutButton />
+          </div>
+        </header>
+
+        <div className="ag-body">
+          {/* GQ hero */}
+          <div className="ag-hero">
+            <div className="ag-hero-left">
+              <div className="ag-sec">Generative Quotient · 14-day window</div>
+              <div className="ag-score-row">
+                <ArrowTip color={tierColor} size={52} />
+                <span className="ag-score-num">{score ?? '—'}</span>
+              </div>
+              <div className="ag-tier-name" style={{ color: tierColor }}>
+                {tier}
+              </div>
+              <div className="ag-tier-pat">{TIER_PATTERN[tier]}</div>
+            </div>
+
+            <div className="ag-divider" />
+
+            <div className="ag-hero-right">
+              <div className="ag-sec">Tier bands</div>
+              <div className="ag-bands">
+                {TIERS.map((t) => (
+                  <div className="ag-band" key={t.name}>
+                    <div>
+                      {t.name === 'Dormant' && <TierIconDormant />}
+                      {t.name === 'Kindling' && <TierIconKindling />}
+                      {t.name === 'Ascending' && <TierIconAscending />}
+                    </div>
+                    <div className="ag-band-info">
+                      <div className="ag-band-name" style={{ color: t.color }}>
+                        {t.name}
+                      </div>
+                      <div className="ag-band-range">{t.range}</div>
+                    </div>
+                    {tier === t.name && <div className="ag-active-dot" style={{ background: t.color }} />}
+                  </div>
+                ))}
+              </div>
+              <p className="ag-blurb">{TIER_BLURB[tier]}</p>
+            </div>
+          </div>
+
+          {/* Metrics */}
+          <div className="ag-metrics">
+            {metrics.map((m, i) => (
+              <div className="ag-metric" key={m.label}>
+                <MetricBar fill={barWidths[i]} />
+                <div className="ag-metric-label">{m.label}</div>
+                <div className="ag-metric-value">{m.value}</div>
+                <div className="ag-metric-sub">14-day avg</div>
+              </div>
+            ))}
+          </div>
+
+          {/* GQ explainer */}
+          <GQExplainer gqScore={score} gqTier={gq?.gqTier ?? null} />
+
+          {/* Two columns: today check-in + recent entries */}
+          <div className="ag-2col">
+            {/* Today’s check-in */}
+            <div className="ag-card">
+              <div className="ag-card-label">Today&apos;s check-in</div>
+              {[
+                {
+                  name: 'Waking Temp',
+                  val: today ? formatTemp(today.waking_temp_value, today.waking_temp_unit, userUnit) : null,
+                },
+                {
+                  name: 'Post-Meal Temp',
+                  val: today ? formatTemp(today.post_meal_temp_value, today.post_meal_temp_unit, userUnit) : null,
+                },
+                {
+                  name: 'Waking Pulse',
+                  val: today ? formatPulse(today.waking_pulse_bpm) : null,
+                },
+                {
+                  name: 'Post-Meal Pulse',
+                  val: today ? formatPulse(today.post_meal_pulse_bpm) : null,
+                },
+              ].map((f) => (
+                <div
+                  className={`ag-field${!f.val || f.val === '—' ? ' ag-field-empty' : ''}`}
+                  key={f.name}
+                >
+                  <div className="ag-field-inner">
+                    <span className="ag-field-name">{f.name}</span>
+                    <span className="ag-field-value">{f.val ?? '—'}</span>
                   </div>
                 </div>
               ))}
+              <a href="/app/log" className="ag-cta">
+                Lock in today&apos;s readings
+              </a>
             </div>
-          </section>
-        ) : (
-          <GQTeaser
-            daysUntilGQ={daysUntilGQ}
-            totalEntries={totalEntries}
-          />
-        )}
 
-        {/* Tier bar only when GQ exists */}
-        {gqResult && <TierBar gqScore={gqResult.gqScore} />}
-
-        {/* Today check-in hint + form */}
-        <section style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {!hasTodayEntry && (
-            <div
-              style={{
-                fontSize: 11,
-                color: "#E4A83C",
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-              }}
-            >
-              Start here: lock in today&apos;s waking and post-meal readings.
+            {/* Recent entries */}
+            <div className="ag-card">
+              <div className="ag-card-label">Recent entries</div>
+              <div className="ag-table-head">
+                <span className="ag-th">Date</span>
+                <span className="ag-th">W Temp</span>
+                <span className="ag-th">M Temp</span>
+                <span className="ag-th">W BPM</span>
+                <span className="ag-th">M BPM</span>
+              </div>
+              {entries.length === 0 ? (
+                <div className="ag-empty">
+                  No readings yet.
+                  <br />
+                  Start with tomorrow&apos;s waking temperature and pulse.
+                </div>
+              ) : (
+                entries.slice(0, 7).map((e) => (
+                  <div className="ag-table-row" key={e.date}>
+                    <span className="ag-td ag-td-date">
+                      {new Date(e.date + 'T12:00:00').toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                      })}
+                    </span>
+                    <span className="ag-td">
+                      {formatTemp(e.waking_temp_value, e.waking_temp_unit, userUnit)}
+                    </span>
+                    <span className="ag-td">
+                      {formatTemp(e.post_meal_temp_value, e.post_meal_temp_unit, userUnit)}
+                    </span>
+                    <span className="ag-td">{formatPulse(e.waking_pulse_bpm)}</span>
+                    <span className="ag-td">{formatPulse(e.post_meal_pulse_bpm)}</span>
+                  </div>
+                ))
+              )}
+              <div className="ag-table-foot">14-day log · tap row to edit</div>
             </div>
-          )}
+          </div>
 
-          <TodayCheckInForm
-            key={refreshKey}
-            userId={userId}
-            defaultUnit={unit}
-            existingEntry={todayEntry}
-            onSaved={() => setRefreshKey((k) => k + 1)}
-          />
-        </section>
-
-        {/* Recent entries */}
-        <section>
-          <RecentEntries entries={entries} />
-        </section>
-
-        {/* Pro-locked charts */}
-        <section>
-          <ProLockedCharts />
-        </section>
-      </main>
-    </div>
-  );
+          {/* Footer */}
+          <div className="ag-footer">
+            <span className="ag-footer-text">Ascentgen · Not medical advice</span>
+            <span className="ag-footer-text">GQ recalculates daily</span>
+          </div>
+        </div>
+      </div>
+    </>
+  )
 }

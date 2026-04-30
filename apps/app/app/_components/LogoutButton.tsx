@@ -1,29 +1,30 @@
 "use client";
-
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/browser";
-import { useTransition } from "react";
 
 export function LogoutButton() {
   const router = useRouter();
-  const supabase = createClient();
-  const [isPending, startTransition] = useTransition();
 
-  const handleLogout = () => {
-    startTransition(async () => {
-      await supabase.auth.signOut();
-      router.push("/login");
-      router.refresh();
-    });
-  };
+  async function handleLogout() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push("/login");
+  }
 
   return (
     <button
       onClick={handleLogout}
-      disabled={isPending}
-      className="rounded-md border border-white/20 px-3 py-1.5 text-xs tracking-[0.16em] uppercase text-white/70 hover:bg-white/5 disabled:opacity-60"
+      style={{
+        fontSize: 12,
+        color: "rgba(255,255,255,0.4)",
+        background: "none",
+        border: "none",
+        cursor: "pointer",
+        letterSpacing: "0.1em",
+        textTransform: "uppercase",
+      }}
     >
-      {isPending ? "Logging out..." : "Logout"}
+      Sign out
     </button>
   );
 }

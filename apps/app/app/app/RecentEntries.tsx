@@ -1,102 +1,59 @@
-// FILE: app/app/RecentEntries.tsx
-'use client';
+"use client";
+
+import { createClient } from "@/lib/supabase/browser";
 
 type Entry = {
   id: string;
   date: string;
   waking_temp_value: number | null;
-  waking_temp_unit: string;
+  waking_temp_unit: string | null;
   waking_pulse_bpm: number | null;
   post_meal_temp_value: number | null;
-  post_meal_temp_unit: string;
+  post_meal_temp_unit: string | null;
   post_meal_pulse_bpm: number | null;
-  notes: string | null;
 };
 
 type Props = {
   entries: Entry[];
+  onDelete: (id: string) => void;
 };
 
-function formatTemp(val: number | null, unit: string): string {
-  if (val == null) return '—';
-  return `${val.toFixed(1)} ${unit}`;
-}
+export default function RecentEntries({ entries, onDelete }: Props) {
+  const supabase = createClient();
 
-function formatPulse(val: number | null): string {
-  if (val == null) return '—';
-  return `${val} bpm`;
-}
-
-function formatDate(dateStr: string): string {
-  const d = new Date(`${dateStr}T12:00:00`);
-  const today = new Date();
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (d.toDateString() === today.toDateString()) return 'Today';
-  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
-export default function RecentEntries({ entries }: Props) {
-  const rows = [...entries].slice(0, 14);
-
-  if (rows.length === 0) {
-    return (
-      <div style={{ background: '#111827', border: '1px solid #1e2330', borderRadius: 12, padding: '28px 24px', textAlign: 'center' }}>
-        <div style={{ color: '#6B7280', fontSize: 14, lineHeight: 1.7 }}>
-          No entries yet. Lock in your first reading above.
-        </div>
-      </div>
-    );
+  async function handleDelete(id: string) {
+    const { error } = await supabase.from("daily_entries").delete().eq("id", id);
+    if (!error) onDelete(id);
+    else alert("Delete failed. Try again.");
   }
 
-  return (
-    <div style={{ background: '#111827', border: '1px solid #1e2330', borderRadius: 12, padding: '28px 24px' }}>
-      <h2 style={{ fontFamily: 'Georgia, serif', fontSize: 16, fontWeight: 400, color: '#E8DCC8', marginBottom: 20 }}>
-        Recent Entries
-      </h2>
+  if (!entries.length) return <p style={{ color: "#999", fontSize: 14 }}>No entries yet — log your first reading above.</p>;
 
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-          <thead>
-            <tr>
-              <th style={thStyle}>Date</th>
-              <th style={thStyle}>Wake Temp</th>
-              <th style={thStyle}>Wake Pulse</th>
-              <th style={thStyle}>PM Temp</th>
-              <th style={thStyle}>PM Pulse</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((entry, i) => (
-              <tr key={entry.id} style={{ borderBottom: i === rows.length - 1 ? 'none' : '1px solid rgba(30,35,48,0.6)' }}>
-                <td style={{ ...tdStyle, color: '#E8DCC8', fontWeight: 500 }}>{formatDate(entry.date)}</td>
-                <td style={tdStyle}>{formatTemp(entry.waking_temp_value, entry.waking_temp_unit)}</td>
-                <td style={tdStyle}>{formatPulse(entry.waking_pulse_bpm)}</td>
-                <td style={tdStyle}>{formatTemp(entry.post_meal_temp_value, entry.post_meal_temp_unit)}</td>
-                <td style={tdStyle}>{formatPulse(entry.post_meal_pulse_bpm)}</td>
-              </tr>
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <thead>
+          <tr style={{ borderBottom: "2px solid #eee" }}>
+            {["Date","Wake Temp","Wake Pulse","PM Temp","PM Pulse",""].map(h => (
+              <th key={h} style={{ padding: "6px 10px", textAlign: "left", color: "#888", fontWeight: 500 }}>{h}</th>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map(e => (
+            <tr key={e.id} style={{ borderBottom: "1px solid #f5f5f5" }}>
+              <td style={{ padding: "8px 10px" }}>{e.date}</td>
+              <td style={{ padding: "8px 10px" }}>{e.waking_temp_value != null ? `${e.waking_temp_value}°${e.waking_temp_unit}` : "—"}</td>
+              <td style={{ padding: "8px 10px" }}>{e.waking_pulse_bpm != null ? `${e.waking_pulse_bpm} bpm` : "—"}</td>
+              <td style={{ padding: "8px 10px" }}>{e.post_meal_temp_value != null ? `${e.post_meal_temp_value}°${e.post_meal_temp_unit}` : "—"}</td>
+              <td style={{ padding: "8px 10px" }}>{e.post_meal_pulse_bpm != null ? `${e.post_meal_pulse_bpm} bpm` : "—"}</td>
+              <td style={{ padding: "8px 10px" }}>
+                <button onClick={() => handleDelete(e.id)} style={{ color: "#c00", background: "none", border: "none", cursor: "pointer", fontSize: 12 }}>Delete</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
-
-const thStyle: React.CSSProperties = {
-  textAlign: 'left',
-  padding: '0 12px 10px 0',
-  color: '#6B7280',
-  fontSize: 10,
-  fontWeight: 700,
-  letterSpacing: '0.08em',
-  textTransform: 'uppercase',
-  borderBottom: '1px solid #1e2330',
-};
-
-const tdStyle: React.CSSProperties = {
-  padding: '12px 12px 12px 0',
-  color: '#6B7280',
-  fontSize: 13,
-};
